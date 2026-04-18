@@ -1,0 +1,64 @@
+{
+  "name": "@idan_ariav/qnode",
+  "version": "0.1.0",
+  "description": "Query Nodes - link-graph indexing and querying for markdown knowledge vaults (siblings, supporters, distance) with 7 semantic link categories",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "qnode": "bin/qnode"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "LICENSE",
+    "README.md"
+  ],
+  "author": "Idan Ariav",
+  "keywords": [
+    "knowledge-graph",
+    "link-graph",
+    "markdown",
+    "obsidian",
+    "pkm",
+    "wikilinks",
+    "mcp",
+    "siblings",
+    "backlinks"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/idanariav/qnode.git"
+  },
+  "homepage": "https://github.com/idanariav/qnode#readme",
+  "bugs": {
+    "url": "https://github.com/idanariav/qnode/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && printf '#!/usr/bin/env node\\n' | cat - dist/cli/qnode.js > dist/cli/qnode.tmp && mv dist/cli/qnode.tmp dist/cli/qnode.js && chmod +x dist/cli/qnode.js",
+    "test": "vitest run --reporter=verbose test/",
+    "qnode": "tsx src/cli/qnode.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "better-sqlite3": "12.8.0",
+    "fast-glob": "3.3.3",
+    "gray-matter": "^4.0.3",
+    "yaml": "2.8.3",
+    "zod": "4.2.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "^22.0.0",
+    "tsx": "4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "3.2.4"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "license": "MIT"
+}

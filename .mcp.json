@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "qnode": {
+      "command": "qnode",
+      "args": ["mcp"]
+    }
+  }
+}

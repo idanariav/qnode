@@ -1,0 +1,14 @@
+#!/bin/sh
+SOURCE="$0"
+while [ -L "$SOURCE" ]; do
+  SOURCE_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  TARGET="$(readlink "$SOURCE")"
+  case "$TARGET" in
+    /*) SOURCE="$TARGET" ;;
+    *) SOURCE="$SOURCE_DIR/$TARGET" ;;
+  esac
+done
+
+DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+
+exec node "$DIR/dist/cli/qnode.js" "$@"
