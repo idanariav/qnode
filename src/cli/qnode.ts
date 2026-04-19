@@ -8,22 +8,26 @@ import {
   effectiveCategoryFields,
   getCollection,
   getConfigPath,
+  globalCategoryFields,
   isValidCollectionName,
   listCollections,
   removeCollection,
   renameCollection,
+  resetCategoryFields,
+  setCategoryFields,
 } from "../collections.js";
 import { Store } from "../store.js";
 import { indexCollection } from "../indexer.js";
 import {
   distance as graphDistance,
+  findByDistance as graphFindByDistance,
   getNodeDetail,
   neighbors as graphNeighbors,
   path as graphPath,
   resolveFileArg,
   siblings as graphSiblings,
 } from "../graph.js";
-import { ALL_CATEGORIES, isCategory, type Category } from "../categories.js";
+import { ALL_CATEGORIES, isCategory, type Category, type CategoryFields } from "../categories.js";
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -88,6 +92,27 @@ function flagCategory(v: unknown): Category | undefined {
 // Help
 // ---------------------------------------------------------------------------
 
+const FIELD_KEYS = [
+  "up-frontmatter",
+  "down-frontmatter",
+  "right-inline",
+  "left-inline",
+  "in-inline",
+  "out-inline",
+] as const;
+type FieldKey = (typeof FIELD_KEYS)[number];
+
+function fieldKeyToCategoryFields(key: FieldKey, values: string[]): Partial<CategoryFields> {
+  switch (key) {
+    case "up-frontmatter": return { up_frontmatter: values };
+    case "down-frontmatter": return { down_frontmatter: values };
+    case "right-inline": return { right_inline: values };
+    case "left-inline": return { left_inline: values };
+    case "in-inline": return { in_inline: values };
+    case "out-inline": return { out_inline: values };
+  }
+}
+
 function cmdHelp(): void {
   console.log(`qnode - Link-graph indexing for markdown vaults
 
@@ -97,14 +122,20 @@ Commands:
   collection remove <name>
   collection rename <old> <new>
 
+  fields get   [--collection <n>]
+  fields set   <field> <val,val,...> [--collection <n>]
+  fields reset [--collection <n>]
+  (fields: ${FIELD_KEYS.join(", ")})
+
   index   [--collection <n>]                           Walk + upsert nodes and edges
   status  [--collection <n>]                           Counts by category
 
-  get       <file>                                     Node + all incoming/outgoing edges
-  neighbors <file> [--category <cat>] [--direction out|in|both] [--json]
-  siblings  <file> [--shared-min N] [--json]
-  distance  <a> <b>  [--max N] [--include-external] [--json]
-  path      <a> <b>  [--max N] [--include-external] [--json]
+  get              <file>                                     Node + all incoming/outgoing edges
+  neighbors        <file> [--category <cat>] [--direction out|in|both] [--json]
+  siblings         <file> [--shared-min N] [--json]
+  distance         <a> <b>  [--max N] [--include-external] [--json]
+  path             <a> <b>  [--max N] [--include-external] [--json]
+  find-by-distance <file> [--max-distance N] [--file-type <tag>] [--include-existing] [--include-external] [--json]
 
   mcp                                                  Start stdio MCP server
 
@@ -116,6 +147,54 @@ Categories: ${ALL_CATEGORIES.join(", ")}
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
+
+function cmdFields(args: ParsedArgs): void {
+  const sub = args.positional[0];
+  const collection = flagStr(args.flags.collection);
+
+  switch (sub) {
+    case "get": {
+      const fields = collection ? effectiveCategoryFields(collection) : globalCategoryFields();
+      const scope = collection ? `collection '${collection}'` : "global";
+      console.log(`# Category fields (${scope})`);
+      for (const key of FIELD_KEYS) {
+        const cfKey = key.replace(/-/g, "_") as keyof CategoryFields;
+        console.log(`  ${key.padEnd(18)} ${(fields[cfKey] as string[]).join(", ")}`);
+      }
+      break;
+    }
+    case "set": {
+      const rawKey = args.positional[1];
+      const rawValues = args.positional[2];
+      if (!rawKey || !rawValues) {
+        console.error(`usage: qnode fields set <field> <val,val,...> [--collection <n>]\nfields: ${FIELD_KEYS.join(", ")}`);
+        process.exit(2);
+      }
+      if (!(FIELD_KEYS as readonly string[]).includes(rawKey)) {
+        console.error(`invalid field: ${rawKey}\nallowed: ${FIELD_KEYS.join(", ")}`);
+        process.exit(2);
+      }
+      const values = rawValues.split(",").map((s) => s.trim()).filter(Boolean);
+      if (values.length === 0) {
+        console.error("values must be a non-empty comma-separated list");
+        process.exit(2);
+      }
+      setCategoryFields(fieldKeyToCategoryFields(rawKey as FieldKey, values), collection);
+      const scope = collection ? `collection '${collection}'` : "global";
+      console.log(`set ${rawKey} = [${values.join(", ")}] (${scope})`);
+      break;
+    }
+    case "reset": {
+      resetCategoryFields(collection);
+      const scope = collection ? `collection '${collection}'` : "global";
+      console.log(`reset category fields (${scope})`);
+      break;
+    }
+    default:
+      console.error(`unknown subcommand: fields ${sub ?? ""}\nusage: fields get|set|reset [--collection <n>]`);
+      process.exit(2);
+  }
+}
 
 function cmdCollection(args: ParsedArgs): void {
   const sub = args.positional[0];
@@ -364,6 +443,43 @@ function cmdPath(args: ParsedArgs): void {
   }
 }
 
+function cmdFindByDistance(args: ParsedArgs): void {
+  const file = args.positional[0];
+  if (!file) {
+    console.error(
+      "usage: qnode find-by-distance <file> [--max-distance N] [--file-type <tag>] [--include-existing] [--include-external] [--json]",
+    );
+    process.exit(2);
+  }
+  const store = new Store();
+  try {
+    const p = resolveFileArg(store, file);
+    if (!p) {
+      console.error(`not found: ${file}`);
+      process.exit(1);
+    }
+    const maxDistance = flagNum(args.flags["max-distance"], 2);
+    const fileType = flagStr(args.flags["file-type"]);
+    const excludeExisting = !args.flags["include-existing"];
+    const includeExternal = !!args.flags["include-external"];
+    const rows = graphFindByDistance(store, p, { maxDistance, fileType, excludeExisting, includeExternal });
+    if (args.flags.json) {
+      console.log(JSON.stringify(rows, null, 2));
+      return;
+    }
+    if (rows.length === 0) {
+      console.log("(no results)");
+      return;
+    }
+    for (const r of rows) {
+      const label = r.title ?? r.path;
+      console.log(`${r.distance}\t${label}\t${r.path}`);
+    }
+  } finally {
+    store.close();
+  }
+}
+
 async function cmdMcp(_args: ParsedArgs): Promise<void> {
   const { startMcp } = await import("../mcp/server.js");
   await startMcp();
@@ -388,6 +504,9 @@ async function main(): Promise<void> {
     case "collection":
       cmdCollection(args);
       break;
+    case "fields":
+      cmdFields(args);
+      break;
     case "index":
       await cmdIndex(args);
       break;
@@ -408,6 +527,9 @@ async function main(): Promise<void> {
       break;
     case "path":
       cmdPath(args);
+      break;
+    case "find-by-distance":
+      cmdFindByDistance(args);
       break;
     case "mcp":
       await cmdMcp(args);

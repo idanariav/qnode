@@ -114,6 +114,14 @@ export function isValidCollectionName(name: string): boolean {
 }
 
 /**
+ * Resolve the effective CategoryFields for global config (no collection scope).
+ */
+export function globalCategoryFields(): CategoryFields {
+  const cfg = loadConfig();
+  return resolveCategoryFields(cfg.category_fields);
+}
+
+/**
  * Resolve the effective CategoryFields for a named collection: collection
  * override wins over global, which wins over built-in defaults.
  */
@@ -123,6 +131,41 @@ export function effectiveCategoryFields(collectionName: string): CategoryFields 
   const global = resolveCategoryFields(cfg.category_fields);
   if (!col?.category_fields) return global;
   return resolveCategoryFields({ ...global, ...col.category_fields });
+}
+
+/**
+ * Set category_fields overrides globally or on a specific collection.
+ * Merges with existing overrides rather than replacing the entire object.
+ */
+export function setCategoryFields(
+  fields: Partial<CategoryFields>,
+  collectionName?: string,
+): void {
+  const config = loadConfig();
+  if (collectionName) {
+    const col = config.collections[collectionName];
+    if (!col) throw new Error(`Collection '${collectionName}' not found`);
+    col.category_fields = { ...(col.category_fields ?? {}), ...fields };
+  } else {
+    config.category_fields = { ...(config.category_fields ?? {}), ...fields };
+  }
+  saveConfig(config);
+}
+
+/**
+ * Remove category_fields overrides globally or from a specific collection,
+ * restoring effective defaults.
+ */
+export function resetCategoryFields(collectionName?: string): void {
+  const config = loadConfig();
+  if (collectionName) {
+    const col = config.collections[collectionName];
+    if (!col) throw new Error(`Collection '${collectionName}' not found`);
+    delete col.category_fields;
+  } else {
+    delete config.category_fields;
+  }
+  saveConfig(config);
 }
 
 export { DEFAULT_CATEGORY_FIELDS };

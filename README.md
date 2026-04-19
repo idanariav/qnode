@@ -63,7 +63,12 @@ qnode collection add <path-to-notes> --name <collection-name> \
 # 2. Build the index
 qnode index --collection <collection-name>
 
-# 3. Ask questions
+# 3. (Optional) customise field → category mappings
+qnode fields set up-frontmatter "Topic,Source"          # global
+qnode fields set right-inline "Supports,Backs" --collection my-notes  # per-collection
+qnode fields get --collection my-notes                  # inspect effective mappings
+
+# 4. Ask questions
 qnode siblings         <file.md>
 qnode neighbors        <file.md> --category Right --direction in
 qnode distance         <file-a.md> <file-b.md>
@@ -80,6 +85,11 @@ qnode collection add <path> --name <n> [--pattern <glob>] [--vault-root <path>]
 qnode collection list
 qnode collection remove <name>
 qnode collection rename <old> <new>
+
+qnode fields get   [--collection <n>]                Show effective field→category mappings
+qnode fields set   <field> <val,val,...>              Set a field (comma-separated values)
+                   [--collection <n>]                Scoped to collection, or global if omitted
+qnode fields reset [--collection <n>]                Remove overrides, restore inherited defaults
 
 qnode index   [--collection <n>]                     Walk and (re)build the graph
 qnode status  [--collection <n>]                     Counts by category
@@ -99,6 +109,8 @@ qnode find-by-distance <file> [--max-distance N]     All nodes within N hops (de
 
 qnode mcp                                            Start stdio MCP server
 ```
+
+Valid `<field>` names for `fields set`: `up-frontmatter`, `down-frontmatter`, `right-inline`, `left-inline`, `in-inline`, `out-inline`.
 
 ## Configuration
 
