@@ -2,11 +2,12 @@
 
 Query Nodes — link-graph indexing and querying for markdown knowledge vaults.
 
-Answers three questions that existing search tools don't handle well:
+Answers questions that existing search tools don't handle well:
 
 1. **Siblings of X** — files that share a topical parent with X.
 2. **Supporters / opposers of X** — files that argue for or against X via categorized links.
 3. **Distance from X to Y** — how many link hops separate two notes.
+4. **Neighborhood of X** — all notes within N hops, optionally filtered by type and excluding already-linked notes.
 
 ## Why
 
@@ -63,11 +64,12 @@ qnode collection add <path-to-notes> --name <collection-name> \
 qnode index --collection <collection-name>
 
 # 3. Ask questions
-qnode siblings  <file.md>
-qnode neighbors <file.md> --category Right --direction in
-qnode distance  <file-a.md> <file-b.md>
-qnode path      <file-a.md> <file-b.md>
-qnode get       <file.md>
+qnode siblings         <file.md>
+qnode neighbors        <file.md> --category Right --direction in
+qnode distance         <file-a.md> <file-b.md>
+qnode path             <file-a.md> <file-b.md>
+qnode find-by-distance <file.md> --file-type claim --max-distance 2
+qnode get              <file.md>
 qnode status
 ```
 
@@ -82,13 +84,18 @@ qnode collection rename <old> <new>
 qnode index   [--collection <n>]                     Walk and (re)build the graph
 qnode status  [--collection <n>]                     Counts by category
 
-qnode get       <file>                               All incoming + outgoing edges for a node
-qnode neighbors <file> [--category <cat>]
-                       [--direction out|in|both]     Default: both
-                       [--format table|json]
-qnode siblings  <file> [--shared-min N]              Shares ≥N Up parents (default 1)
-qnode distance  <a> <b> [--max N] [--include-external]
-qnode path      <a> <b> [--max N] [--include-external]
+qnode get              <file>                        All incoming + outgoing edges for a node
+qnode neighbors        <file> [--category <cat>]
+                              [--direction out|in|both]   Default: both
+                              [--json]
+qnode siblings         <file> [--shared-min N]       Shares ≥N Up parents (default 1)
+qnode distance         <a> <b> [--max N] [--include-external]
+qnode path             <a> <b> [--max N] [--include-external]
+qnode find-by-distance <file> [--max-distance N]     All nodes within N hops (default 2)
+                              [--file-type <tag>]    Filter by frontmatter type/tags field
+                              [--include-existing]   Include directly-linked nodes (excluded by default)
+                              [--include-external]   Traverse through out-of-collection files
+                              [--json]
 
 qnode mcp                                            Start stdio MCP server
 ```
@@ -127,7 +134,8 @@ Any field not listed in `category_fields` is ignored. Plain wikilinks (no prefix
 - `siblings(path, shared_min?, collection?)`
 - `neighbors(path, category?, direction?, collection?)`
 - `distance(from, to, max?, include_external?)`
-- `path(from, to, max?)`
+- `path(from, to, max?, include_external?)`
+- `find_by_distance(path, max_distance?, file_type?, exclude_existing?, include_external?)` — all nodes within N hops; `file_type` matches frontmatter `type` field or Obsidian hierarchical tags (e.g. `"claim"` matches `Type/Claim`); `exclude_existing` (default `true`) skips directly-linked notes
 - `get(path)`
 - `status(collection?)`
 
