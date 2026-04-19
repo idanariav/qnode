@@ -12,7 +12,8 @@
     "bin/",
     "dist/",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "author": "Idan Ariav",
   "keywords": [

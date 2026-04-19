@@ -44,11 +44,7 @@ A **collection** is a scoped view of your vault. Registering a collection tells 
 ## Install
 
 ```sh
-git clone https://github.com/idanariav/qnode.git
-cd qnode
-npm install
-npm run build
-npm link   # makes `qnode` available globally
+npm install -g @idan_ariav/qnode
 ```
 
 Requires Node ≥ 22.
