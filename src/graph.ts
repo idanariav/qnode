@@ -4,8 +4,9 @@
  * bundles together "all edges for a file" for the `get` command.
  */
 
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { isAbsolute, resolve } from "path";
+import matter from "gray-matter";
 import type { Category } from "./categories.js";
 import type { EdgeRow, NodeRow, Store } from "./store.js";
 
@@ -73,4 +74,57 @@ export function path(
   includeExternal: boolean = false,
 ): string[] | null {
   return store.path(a, b, maxHops, includeExternal);
+}
+
+export interface DistanceResult {
+  path: string;
+  distance: number;
+  collection: string | null;
+  title: string | null;
+}
+
+function matchesFileType(filePath: string, fileType: string): boolean {
+  try {
+    const content = readFileSync(filePath, "utf8");
+    const { data } = matter(content);
+    const lower = fileType.toLowerCase();
+    // Check plain `type` field
+    if (typeof data.type === "string" && data.type.toLowerCase() === lower) return true;
+    // Check `tags` array — supports both exact match and Obsidian hierarchical tags (e.g. "Type/Claim")
+    if (Array.isArray(data.tags)) {
+      for (const tag of data.tags) {
+        if (typeof tag !== "string") continue;
+        const t = tag.toLowerCase();
+        if (t === lower || t.endsWith("/" + lower)) return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export function findByDistance(
+  store: Store,
+  filePath: string,
+  opts: {
+    fileType?: string;
+    maxDistance?: number;
+    excludeExisting?: boolean;
+    includeExternal?: boolean;
+  } = {},
+): DistanceResult[] {
+  const { fileType, maxDistance = 2, excludeExisting = true, includeExternal = false } = opts;
+
+  let results = store.findByDistance(filePath, maxDistance, includeExternal);
+
+  if (excludeExisting) {
+    results = results.filter((r) => r.distance > 1);
+  }
+
+  if (fileType) {
+    results = results.filter((r) => matchesFileType(r.path, fileType));
+  }
+
+  return results;
 }

@@ -344,6 +344,61 @@ export class Store {
   }
 
   /**
+   * BFS from `start`, collecting all reachable nodes within `maxHops` hops.
+   * Returns each node with its exact distance. The start node is excluded.
+   */
+  findByDistance(
+    start: string,
+    maxHops: number = 2,
+    includeExternal: boolean = false,
+  ): { path: string; distance: number; collection: string | null; title: string | null }[] {
+    const neighborStmt = includeExternal
+      ? this.db.prepare(
+          `SELECT DISTINCT other FROM (
+             SELECT dst_path AS other FROM edges WHERE src_path = ? AND dst_path IS NOT NULL
+             UNION
+             SELECT src_path AS other FROM edges WHERE dst_path = ?
+           ) WHERE other IS NOT NULL`,
+        )
+      : this.db.prepare(
+          `SELECT DISTINCT other FROM (
+             SELECT dst_path AS other FROM edges WHERE src_path = ? AND dst_path IS NOT NULL
+             UNION
+             SELECT src_path AS other FROM edges WHERE dst_path = ?
+           ) WHERE other IS NOT NULL
+             AND EXISTS (SELECT 1 FROM nodes n WHERE n.path = other AND n.collection IS NOT NULL)`,
+        );
+
+    const distances = new Map<string, number>();
+    distances.set(start, 0);
+    let frontier: string[] = [start];
+
+    for (let depth = 0; depth < maxHops; depth++) {
+      const next: string[] = [];
+      for (const node of frontier) {
+        const rows = neighborStmt.all(node, node) as { other: string }[];
+        for (const r of rows) {
+          if (distances.has(r.other)) continue;
+          distances.set(r.other, depth + 1);
+          next.push(r.other);
+        }
+      }
+      if (next.length === 0) break;
+      frontier = next;
+    }
+
+    distances.delete(start);
+
+    const results: { path: string; distance: number; collection: string | null; title: string | null }[] = [];
+    for (const [nodePath, dist] of distances) {
+      const node = this.getNode(nodePath);
+      results.push({ path: nodePath, distance: dist, collection: node?.collection ?? null, title: node?.title ?? null });
+    }
+
+    return results.sort((a, b) => a.distance - b.distance || a.path.localeCompare(b.path));
+  }
+
+  /**
    * BFS distance between two nodes (undirected). Returns null if no path
    * is found within maxHops. Delegates to `path()` to avoid two BFS impls.
    */

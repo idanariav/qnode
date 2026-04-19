@@ -19,6 +19,7 @@ import {
 import { Store } from "../store.js";
 import {
   distance as graphDistance,
+  findByDistance as graphFindByDistance,
   getNodeDetail,
   neighbors as graphNeighbors,
   path as graphPath,
@@ -121,6 +122,36 @@ export async function startMcp(): Promise<void> {
           properties: { collection: { type: "string" } },
         },
       },
+      {
+        name: "find_by_distance",
+        description:
+          "Find all nodes reachable within max_distance hops from a file. Optionally filter by frontmatter type/tags field and exclude files already directly linked.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Source file (absolute or suffix path)" },
+            file_type: {
+              type: "string",
+              description:
+                "Filter results to nodes whose frontmatter `type` field or `tags` array matches this value (e.g. 'claim', 'book')",
+            },
+            max_distance: {
+              type: "number",
+              description: "Maximum hops from source (default 2)",
+            },
+            exclude_existing: {
+              type: "boolean",
+              description:
+                "Exclude files already directly linked to the source (distance 1). Default true.",
+            },
+            include_external: {
+              type: "boolean",
+              description: "Allow hops through files outside any collection (default false)",
+            },
+          },
+          required: ["path"],
+        },
+      },
     ],
   }));
 
@@ -186,6 +217,19 @@ export async function startMcp(): Promise<void> {
     if (name === "status") {
       const col = typeof args.collection === "string" ? args.collection : undefined;
       return jsonText(store.status(col));
+    }
+    if (name === "find_by_distance") {
+      const p = typeof args.path === "string" ? args.path : "";
+      if (!p) return errText("missing path");
+      const resolved = resolveFileArg(store, p);
+      if (!resolved) return errText(`not found: ${p}`);
+      const fileType = typeof args.file_type === "string" ? args.file_type : undefined;
+      const maxDistance = typeof args.max_distance === "number" ? args.max_distance : 2;
+      const excludeExisting = args.exclude_existing !== false;
+      const includeExternal = !!args.include_external;
+      return jsonText(
+        graphFindByDistance(store, resolved, { fileType, maxDistance, excludeExisting, includeExternal }),
+      );
     }
     return errText(`unknown tool: ${name}`);
   });
