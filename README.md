@@ -173,11 +173,11 @@ Run qnode as a Model Context Protocol server to enable Claude Code agents to que
 # Install from npm (if not already installed)
 npm install -g @idan_ariav/qnode
 
-# Add qnode to Claude Code via plugin marketplace (one command)
-claude plugin marketplace add idanariav/qnode
+# Add the pkm-query-tools marketplace (one command)
+claude plugin marketplace add idanariav/pkm-query-tools
 
 # Install the plugin
-claude plugin install qnode@qnode
+claude plugin install qnode@pkm-query-tools
 
 # Verify it's connected
 /mcp list
