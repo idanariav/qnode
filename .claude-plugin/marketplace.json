@@ -1,4 +1,7 @@
 {
+  "owner": {
+    "name": "idan_ariav"
+  },
   "name": "qnode",
   "plugins": [
     {
@@ -6,8 +9,8 @@
       "version": "0.1.0",
       "description": "Link-graph indexing and querying for markdown knowledge vaults with MCP integration",
       "source": {
-        "source": "git",
-        "url": "https://github.com/idanariav/qnode.git"
+        "type": "npm",
+        "package": "@idan_ariav/qnode"
       }
     }
   ]
