@@ -137,7 +137,10 @@ Commands:
   distance         <a> <b>  [--max N] [--include-external] [--json]
   path             <a> <b>  [--max N] [--include-external] [--json]
   find-by-distance <file> [--max-distance N] [--file-type <tag>] [--include-existing] [--include-external] [--json]
-  metrics          [--collection <n>] [--top N] [--sort pagerank|betweenness|clustering_coeff|in_degree|out_degree|community] [--json]
+  metrics compute  [--collection <n>]
+  metrics show     [--collection <n>] [--top N] [--sort pagerank|betweenness|clustering_coeff|in_degree|out_degree|community]
+                   [--min-<field> N] [--max-<field> N]   e.g. --min-in_degree 50
+                   [--json]
 
   mcp                                                  Start stdio MCP server
 
@@ -485,54 +488,105 @@ function cmdFindByDistance(args: ParsedArgs): void {
 const METRIC_SORT_KEYS = ["pagerank", "betweenness", "clustering_coeff", "in_degree", "out_degree", "community"] as const;
 type MetricSortKey = (typeof METRIC_SORT_KEYS)[number];
 
-function cmdMetrics(args: ParsedArgs): void {
-  const collection = flagStr(args.flags.collection);
-  const top = flagNum(args.flags.top, 0);
-  const sortBy = (flagStr(args.flags.sort) ?? "pagerank") as MetricSortKey;
-  if (!(METRIC_SORT_KEYS as readonly string[]).includes(sortBy)) {
-    console.error(`invalid --sort: ${sortBy} (allowed: ${METRIC_SORT_KEYS.join(", ")})`);
-    process.exit(2);
+function printMetricsTable(
+  rows: import("../store.js").MetricsRow[],
+  sortBy: MetricSortKey,
+  top: number,
+  json: boolean,
+  filters: { field: MetricSortKey; min?: number; max?: number }[],
+): void {
+  let filtered = rows;
+  for (const f of filters) {
+    if (f.min !== undefined) filtered = filtered.filter((r) => (r[f.field] as number) >= f.min!);
+    if (f.max !== undefined) filtered = filtered.filter((r) => (r[f.field] as number) <= f.max!);
   }
-  const store = new Store();
-  try {
-    const rows = computeMetrics(store, collection);
-    if (rows.length === 0) {
-      console.log("(no in-collection nodes found)");
-      return;
-    }
-    store.clearMetrics(collection);
-    store.upsertMetrics(rows);
+  const sorted = [...filtered].sort((a, b) => (b[sortBy] as number) - (a[sortBy] as number));
+  const output = top > 0 ? sorted.slice(0, top) : sorted;
+  if (json) {
+    console.log(JSON.stringify(output, null, 2));
+    return;
+  }
+  console.log(`${"path".padEnd(50)} ${"PR".padStart(8)} ${"BC".padStart(10)} ${"CC".padStart(6)} ${"in".padStart(4)} ${"out".padStart(4)} ${"comm".padStart(5)}`);
+  for (const r of output) {
+    const p = r.path.length > 50 ? "…" + r.path.slice(-49) : r.path.padEnd(50);
+    console.log(
+      `${p} ` +
+      `${r.pagerank.toFixed(4).padStart(8)} ` +
+      `${r.betweenness.toFixed(4).padStart(10)} ` +
+      `${r.clustering_coeff.toFixed(4).padStart(6)} ` +
+      `${String(r.in_degree).padStart(4)} ` +
+      `${String(r.out_degree).padStart(4)} ` +
+      `${String(r.community).padStart(5)}`,
+    );
+  }
+  const ts = rows[0] ? new Date(rows[0].computed_at).toISOString() : "";
+  console.log(`\n${output.length} nodes, computed at ${ts}`);
+}
 
-    const sorted = [...rows].sort((a, b) => {
-      const av = a[sortBy] as number;
-      const bv = b[sortBy] as number;
-      return bv - av;
-    });
-    const output = top > 0 ? sorted.slice(0, top) : sorted;
-
-    if (args.flags.json) {
-      console.log(JSON.stringify(output, null, 2));
-      return;
+function cmdMetrics(args: ParsedArgs): void {
+  const sub = args.positional[0];
+  switch (sub) {
+    case "compute": {
+      const collection = flagStr(args.flags.collection);
+      const store = new Store();
+      try {
+        const rows = computeMetrics(store, collection);
+        if (rows.length === 0) {
+          console.log("(no in-collection nodes found)");
+          return;
+        }
+        store.clearMetrics(collection);
+        store.upsertMetrics(rows);
+        const scope = collection ? `collection '${collection}'` : "all collections";
+        console.log(`computed metrics for ${rows.length} nodes (${scope})`);
+      } finally {
+        store.close();
+      }
+      break;
     }
+    case "show": {
+      const collection = flagStr(args.flags.collection);
+      const top = flagNum(args.flags.top, 0);
+      const sortBy = (flagStr(args.flags.sort) ?? "pagerank") as MetricSortKey;
+      if (!(METRIC_SORT_KEYS as readonly string[]).includes(sortBy)) {
+        console.error(`invalid --sort: ${sortBy} (allowed: ${METRIC_SORT_KEYS.join(", ")})`);
+        process.exit(2);
+      }
 
-    const header = `${"path".padEnd(50)} ${"PR".padStart(8)} ${"BC".padStart(10)} ${"CC".padStart(6)} ${"in".padStart(4)} ${"out".padStart(4)} ${"comm".padStart(5)}`;
-    console.log(header);
-    for (const r of output) {
-      const p = r.path.length > 50 ? "…" + r.path.slice(-(49)) : r.path.padEnd(50);
-      console.log(
-        `${p} ` +
-        `${r.pagerank.toFixed(4).padStart(8)} ` +
-        `${r.betweenness.toFixed(4).padStart(10)} ` +
-        `${r.clustering_coeff.toFixed(4).padStart(6)} ` +
-        `${String(r.in_degree).padStart(4)} ` +
-        `${String(r.out_degree).padStart(4)} ` +
-        `${String(r.community).padStart(5)}`,
-      );
+      // --min-<field> <value> and --max-<field> <value>, e.g. --min-in_degree 50
+      const filters: { field: MetricSortKey; min?: number; max?: number }[] = [];
+      for (const bound of ["min", "max"] as const) {
+        for (const key of METRIC_SORT_KEYS) {
+          const val = args.flags[`${bound}-${key}`];
+          if (typeof val === "string") {
+            const n = Number(val);
+            if (Number.isNaN(n)) {
+              console.error(`--${bound}-${key} requires a number`);
+              process.exit(2);
+            }
+            const existing = filters.find((f) => f.field === key);
+            if (existing) existing[bound] = n;
+            else filters.push({ field: key, [bound]: n });
+          }
+        }
+      }
+
+      const store = new Store();
+      try {
+        const rows = store.allMetrics(collection);
+        if (rows.length === 0) {
+          console.log("(no metrics stored; run: qnode metrics compute)");
+          return;
+        }
+        printMetricsTable(rows, sortBy, top, !!args.flags.json, filters);
+      } finally {
+        store.close();
+      }
+      break;
     }
-    const ts = rows[0] ? new Date(rows[0].computed_at).toISOString() : "";
-    console.log(`\n${output.length} nodes computed at ${ts}`);
-  } finally {
-    store.close();
+    default:
+      console.error(`unknown subcommand: metrics ${sub ?? ""}\nusage: metrics compute|show [--collection <n>]`);
+      process.exit(2);
   }
 }
 

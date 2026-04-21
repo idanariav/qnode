@@ -8,6 +8,7 @@ Answers questions that existing search tools don't handle well:
 2. **Supporters / opposers of X** — files that argue for or against X via categorized links.
 3. **Distance from X to Y** — how many link hops separate two notes.
 4. **Neighborhood of X** — all notes within N hops, optionally filtered by type and excluding already-linked notes.
+5. **Network importance of X** — PageRank, betweenness centrality, clustering coefficient, and community assignment across the whole graph.
 
 ## Why
 
@@ -72,6 +73,10 @@ qnode path             <file-a.md> <file-b.md>
 qnode find-by-distance <file.md> --file-type claim --max-distance 2
 qnode get              <file.md>
 qnode status
+
+# 5. (Optional) compute network metrics
+qnode metrics compute --collection <collection-name>
+qnode metrics show --top 20 --sort pagerank
 ```
 
 ## Command reference
@@ -103,8 +108,31 @@ qnode find-by-distance <file> [--max-distance N]     All nodes within N hops (de
                               [--include-external]   Traverse through out-of-collection files
                               [--json]
 
+qnode metrics compute [--collection <n>]             Compute network metrics and store in index
+qnode metrics show    [--collection <n>]             Display stored metrics (requires compute first)
+                      [--top N]                      Show only top N nodes
+                      [--sort pagerank|betweenness|clustering_coeff|in_degree|out_degree|community]
+                      [--min-<field> N]              Only nodes where field ≥ N (e.g. --min-in_degree 50)
+                      [--max-<field> N]              Only nodes where field ≤ N
+                      [--json]
+
 qnode mcp                                            Start stdio MCP server
 ```
+
+## Network metrics
+
+`qnode metrics compute` analyses the link graph and stores five metrics per node. Run it after `qnode index`; re-run whenever you re-index.
+
+| Metric | Description |
+|---|---|
+| `in_degree` | Number of distinct resolved sources pointing at this node |
+| `out_degree` | Number of distinct resolved destinations this node points at |
+| `pagerank` | Directed PageRank (d = 0.85) — measures how often a random walk lands here |
+| `betweenness` | Undirected betweenness centrality — how often this node lies on shortest paths between others |
+| `clustering_coeff` | Undirected local clustering coefficient — how densely connected this node's neighbors are |
+| `community` | Community ID assigned by label propagation — nodes with the same ID form a densely linked cluster |
+
+Metrics are scoped to in-collection nodes only; edges to external files are excluded. Each metric is stored in the index and returned by `qnode get` and the MCP `get` / `metrics` tools.
 
 Valid `<field>` names for `fields set`: `up-frontmatter`, `down-frontmatter`, `right-inline`, `left-inline`, `in-inline`, `out-inline`.
 
@@ -144,7 +172,8 @@ Any field not listed in `category_fields` is ignored. Plain wikilinks (no prefix
 - `distance(from, to, max?, include_external?)`
 - `path(from, to, max?, include_external?)`
 - `find_by_distance(path, max_distance?, file_type?, exclude_existing?, include_external?)` — all nodes within N hops; `file_type` matches frontmatter `type` field or Obsidian hierarchical tags (e.g. `"claim"` matches `Type/Claim`); `exclude_existing` (default `true`) skips directly-linked notes
-- `get(path)`
+- `get(path)` — includes a `metrics` field (null until `qnode metrics compute` has been run)
+- `metrics(path)` — returns stored network metrics for a single node
 - `status(collection?)`
 
 Register it with your MCP-capable client (e.g. via the included `.mcp.json`).
