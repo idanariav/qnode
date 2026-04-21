@@ -163,20 +163,83 @@ category_fields:                                     # global defaults
 
 Any field not listed in `category_fields` is ignored. Plain wikilinks (no prefix) are always **Uncategorized**.
 
-## MCP
+## Claude Code MCP Integration
 
-`qnode mcp` starts a stdio MCP server. Tools exposed:
+Run qnode as a Model Context Protocol server to enable Claude Code agents to query your knowledge graph.
 
-- `siblings(path, shared_min?, collection?)`
-- `neighbors(path, category?, direction?, collection?)`
-- `distance(from, to, max?, include_external?)`
-- `path(from, to, max?, include_external?)`
-- `find_by_distance(path, max_distance?, file_type?, exclude_existing?, include_external?)` — all nodes within N hops; `file_type` matches frontmatter `type` field or Obsidian hierarchical tags (e.g. `"claim"` matches `Type/Claim`); `exclude_existing` (default `true`) skips directly-linked notes
-- `get(path)` — includes a `metrics` field (null until `qnode metrics compute` has been run)
-- `metrics(path)` — returns stored network metrics for a single node
-- `status(collection?)`
+### Quick Start
 
-Register it with your MCP-capable client (e.g. via the included `.mcp.json`).
+```bash
+# Install from npm (if not already installed)
+npm install -g @idan_ariav/qnode
+
+# Add qnode to Claude Code via plugin marketplace (one command)
+claude plugin marketplace add idanariav/qnode
+
+# Install the plugin
+claude plugin install qnode@qnode
+
+# Verify it's connected
+/mcp list
+```
+
+You should see `qnode` in the list of active MCP servers.
+
+### Manual Setup (if marketplace doesn't work)
+
+If the marketplace approach has issues, configure directly in `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "qnode": {
+      "command": "qnode",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Then verify with `/mcp list`.
+
+### Using qnode in Claude Code Agents
+
+Once registered, agents can query your knowledge graph directly:
+
+```
+Find all notes within 2 hops of "epistemology.md" that are of type "claim".
+Show me the shortest path from "artificial-intelligence.md" to "consciousness.md".
+What are the strongest nodes by PageRank in my knowledge base?
+```
+
+The agent will:
+1. Use `qnode get` to fetch node details and metrics
+2. Use `qnode distance` / `qnode path` for graph traversal
+3. Use `qnode find_by_distance` for filtered neighborhood searches
+4. Use `qnode status` to understand your index
+
+### MCP Tools Reference
+
+`qnode mcp` exposes 8 tools:
+
+- `siblings(path, shared_min?, collection?)` — Files sharing one or more Up (topic/parent) links
+- `neighbors(path, category?, direction?, collection?)` — Incoming/outgoing categorized edges
+- `distance(from, to, max?, include_external?)` — Shortest-path distance (in hops)
+- `path(from, to, max?, include_external?)` — Shortest path as a list of file paths
+- `find_by_distance(path, max_distance?, file_type?, exclude_existing?, include_external?)` — All nodes within N hops, optionally filtered by `type` field or hierarchical tags
+- `get(path)` — Full node detail: incoming/outgoing edges, metrics, title
+- `metrics(path)` — Network metrics (PageRank, betweenness, clustering coefficient, in/out degree, community ID)
+- `status(collection?)` — Index counts by category and collection
+
+### Running the MCP Server Standalone
+
+For debugging or custom integrations:
+
+```sh
+qnode mcp
+```
+
+qnode uses stdio transport, compatible with Claude Code and all standard MCP clients.
 
 ## How it compares to other tools
 
