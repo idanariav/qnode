@@ -4,7 +4,7 @@
     {
       "name": "qnode",
       "version": "0.1.0",
-      "description": "Link-graph indexing and querying for markdown knowledge vaults with 7 semantic link categories and MCP integration",
+      "description": "Link-graph indexing and querying for markdown knowledge vaults with MCP integration",
       "source": {
         "source": "git",
         "url": "https://github.com/idanariav/qnode.git"
