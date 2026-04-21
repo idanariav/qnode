@@ -5,3 +5,4 @@ export * from "./resolver.js";
 export * from "./parser.js";
 export * from "./indexer.js";
 export * from "./graph.js";
+export * from "./metrics.js";

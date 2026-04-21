@@ -28,6 +28,7 @@ import {
   siblings as graphSiblings,
 } from "../graph.js";
 import { ALL_CATEGORIES, isCategory, type Category, type CategoryFields } from "../categories.js";
+import { computeMetrics } from "../metrics.js";
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -136,6 +137,7 @@ Commands:
   distance         <a> <b>  [--max N] [--include-external] [--json]
   path             <a> <b>  [--max N] [--include-external] [--json]
   find-by-distance <file> [--max-distance N] [--file-type <tag>] [--include-existing] [--include-external] [--json]
+  metrics          [--collection <n>] [--top N] [--sort pagerank|betweenness|clustering_coeff|in_degree|out_degree|community] [--json]
 
   mcp                                                  Start stdio MCP server
 
@@ -480,6 +482,60 @@ function cmdFindByDistance(args: ParsedArgs): void {
   }
 }
 
+const METRIC_SORT_KEYS = ["pagerank", "betweenness", "clustering_coeff", "in_degree", "out_degree", "community"] as const;
+type MetricSortKey = (typeof METRIC_SORT_KEYS)[number];
+
+function cmdMetrics(args: ParsedArgs): void {
+  const collection = flagStr(args.flags.collection);
+  const top = flagNum(args.flags.top, 0);
+  const sortBy = (flagStr(args.flags.sort) ?? "pagerank") as MetricSortKey;
+  if (!(METRIC_SORT_KEYS as readonly string[]).includes(sortBy)) {
+    console.error(`invalid --sort: ${sortBy} (allowed: ${METRIC_SORT_KEYS.join(", ")})`);
+    process.exit(2);
+  }
+  const store = new Store();
+  try {
+    const rows = computeMetrics(store, collection);
+    if (rows.length === 0) {
+      console.log("(no in-collection nodes found)");
+      return;
+    }
+    store.clearMetrics(collection);
+    store.upsertMetrics(rows);
+
+    const sorted = [...rows].sort((a, b) => {
+      const av = a[sortBy] as number;
+      const bv = b[sortBy] as number;
+      return bv - av;
+    });
+    const output = top > 0 ? sorted.slice(0, top) : sorted;
+
+    if (args.flags.json) {
+      console.log(JSON.stringify(output, null, 2));
+      return;
+    }
+
+    const header = `${"path".padEnd(50)} ${"PR".padStart(8)} ${"BC".padStart(10)} ${"CC".padStart(6)} ${"in".padStart(4)} ${"out".padStart(4)} ${"comm".padStart(5)}`;
+    console.log(header);
+    for (const r of output) {
+      const p = r.path.length > 50 ? "…" + r.path.slice(-(49)) : r.path.padEnd(50);
+      console.log(
+        `${p} ` +
+        `${r.pagerank.toFixed(4).padStart(8)} ` +
+        `${r.betweenness.toFixed(4).padStart(10)} ` +
+        `${r.clustering_coeff.toFixed(4).padStart(6)} ` +
+        `${String(r.in_degree).padStart(4)} ` +
+        `${String(r.out_degree).padStart(4)} ` +
+        `${String(r.community).padStart(5)}`,
+      );
+    }
+    const ts = rows[0] ? new Date(rows[0].computed_at).toISOString() : "";
+    console.log(`\n${output.length} nodes computed at ${ts}`);
+  } finally {
+    store.close();
+  }
+}
+
 async function cmdMcp(_args: ParsedArgs): Promise<void> {
   const { startMcp } = await import("../mcp/server.js");
   await startMcp();
@@ -530,6 +586,9 @@ async function main(): Promise<void> {
       break;
     case "find-by-distance":
       cmdFindByDistance(args);
+      break;
+    case "metrics":
+      cmdMetrics(args);
       break;
     case "mcp":
       await cmdMcp(args);

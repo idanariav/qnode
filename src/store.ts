@@ -55,6 +55,17 @@ export interface NewEdge {
   alias: string | null;
 }
 
+export interface MetricsRow {
+  path: string;
+  in_degree: number;
+  out_degree: number;
+  pagerank: number;
+  betweenness: number;
+  clustering_coeff: number;
+  community: number;
+  computed_at: number;
+}
+
 function getCacheDir(): string {
   if (process.env.QNODE_CACHE_DIR) return process.env.QNODE_CACHE_DIR;
   if (process.env.XDG_CACHE_HOME) return join(process.env.XDG_CACHE_HOME, "qnode");
@@ -122,6 +133,20 @@ export class Store {
       CREATE INDEX IF NOT EXISTS idx_edges_src ON edges(src_path, category);
       CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst_path, category);
       CREATE INDEX IF NOT EXISTS idx_edges_dst_target ON edges(dst_target);
+
+      CREATE TABLE IF NOT EXISTS node_metrics (
+        path             TEXT PRIMARY KEY,
+        in_degree        INTEGER NOT NULL DEFAULT 0,
+        out_degree       INTEGER NOT NULL DEFAULT 0,
+        pagerank         REAL    NOT NULL DEFAULT 0.0,
+        betweenness      REAL    NOT NULL DEFAULT 0.0,
+        clustering_coeff REAL    NOT NULL DEFAULT 0.0,
+        community        INTEGER NOT NULL DEFAULT 0,
+        computed_at      INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_node_metrics_pagerank ON node_metrics(pagerank DESC);
+      CREATE INDEX IF NOT EXISTS idx_node_metrics_community ON node_metrics(community);
     `);
   }
 
@@ -263,6 +288,104 @@ export class Store {
          FROM edges WHERE dst_path = ?`,
       )
       .all(dst) as EdgeRow[];
+  }
+
+  // -------- Metrics --------
+
+  upsertMetrics(rows: MetricsRow[]): void {
+    if (rows.length === 0) return;
+    const stmt = this.db.prepare(
+      `INSERT OR REPLACE INTO node_metrics
+         (path, in_degree, out_degree, pagerank, betweenness, clustering_coeff, community, computed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const txn = this.db.transaction((rs: MetricsRow[]) => {
+      for (const r of rs) {
+        stmt.run(r.path, r.in_degree, r.out_degree, r.pagerank, r.betweenness, r.clustering_coeff, r.community, r.computed_at);
+      }
+    });
+    txn(rows);
+  }
+
+  getMetrics(path: string): MetricsRow | null {
+    const row = this.db
+      .prepare(`SELECT * FROM node_metrics WHERE path = ?`)
+      .get(path) as MetricsRow | undefined;
+    return row ?? null;
+  }
+
+  allMetrics(collection?: string): MetricsRow[] {
+    if (collection) {
+      return this.db
+        .prepare(
+          `SELECT m.* FROM node_metrics m
+           JOIN nodes n ON n.path = m.path
+           WHERE n.collection = ?
+           ORDER BY m.pagerank DESC`,
+        )
+        .all(collection) as MetricsRow[];
+    }
+    return this.db
+      .prepare(
+        `SELECT m.* FROM node_metrics m
+         JOIN nodes n ON n.path = m.path
+         ORDER BY m.pagerank DESC`,
+      )
+      .all() as MetricsRow[];
+  }
+
+  clearMetrics(collection?: string): void {
+    if (collection) {
+      this.db
+        .prepare(
+          `DELETE FROM node_metrics WHERE path IN (
+             SELECT path FROM nodes WHERE collection = ?
+           )`,
+        )
+        .run(collection);
+    } else {
+      this.db.prepare(`DELETE FROM node_metrics`).run();
+    }
+  }
+
+  /** Load resolved edges between in-collection nodes for metric computation. */
+  loadResolvedEdges(collection?: string): { src: string; dst: string }[] {
+    if (collection) {
+      return this.db
+        .prepare(
+          `SELECT DISTINCT e.src_path AS src, e.dst_path AS dst
+           FROM edges e
+           JOIN nodes ns ON ns.path = e.src_path AND ns.collection = ?
+           JOIN nodes nd ON nd.path = e.dst_path AND nd.collection = ?
+           WHERE e.dst_path IS NOT NULL AND e.src_path != e.dst_path`,
+        )
+        .all(collection, collection) as { src: string; dst: string }[];
+    }
+    return this.db
+      .prepare(
+        `SELECT DISTINCT e.src_path AS src, e.dst_path AS dst
+         FROM edges e
+         JOIN nodes ns ON ns.path = e.src_path AND ns.collection IS NOT NULL
+         JOIN nodes nd ON nd.path = e.dst_path AND nd.collection IS NOT NULL
+         WHERE e.dst_path IS NOT NULL AND e.src_path != e.dst_path`,
+      )
+      .all() as { src: string; dst: string }[];
+  }
+
+  /** Load in-collection node paths for metric computation. */
+  loadInCollectionNodes(collection?: string): string[] {
+    if (collection) {
+      return (
+        this.db
+          .prepare(`SELECT path FROM nodes WHERE collection = ?`)
+          .all(collection) as { path: string }[]
+      ).map((r) => r.path);
+    }
+    return (
+      this.db
+        .prepare(`SELECT path FROM nodes WHERE collection IS NOT NULL`)
+        .all() as { path: string }[]
+    ).map((r) => r.path);
   }
 
   // -------- Stats --------

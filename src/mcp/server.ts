@@ -6,8 +6,9 @@
  *   neighbors(path, category?, direction?, collection?) → Edge[]
  *   distance(from, to, max?, include_external?) → { distance: number | null }
  *   path(from, to, max?, include_external?) → { path: string[] | null }
- *   get(path) → { node, outgoing, incoming }
+ *   get(path) → { node, outgoing, incoming, metrics }
  *   status(collection?) → { nodes, external_nodes, edges, by_category, by_collection }
+ *   metrics(path) → MetricsRow | { message }
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -17,6 +18,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Store } from "../store.js";
+import { computeMetrics } from "../metrics.js";
 import {
   distance as graphDistance,
   findByDistance as graphFindByDistance,
@@ -123,6 +125,20 @@ export async function startMcp(): Promise<void> {
         },
       },
       {
+        name: "metrics",
+        description:
+          "Network analysis metrics for a single node: PageRank, betweenness centrality, " +
+          "clustering coefficient, in-degree, out-degree, and community ID. " +
+          "Returns null if qnode metrics has not been run yet.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Absolute or suffix path of the file" },
+          },
+          required: ["path"],
+        },
+      },
+      {
         name: "find_by_distance",
         description:
           "Find all nodes reachable within max_distance hops from a file. Optionally filter by frontmatter type/tags field and exclude files already directly linked.",
@@ -217,6 +233,17 @@ export async function startMcp(): Promise<void> {
     if (name === "status") {
       const col = typeof args.collection === "string" ? args.collection : undefined;
       return jsonText(store.status(col));
+    }
+    if (name === "metrics") {
+      const p = typeof args.path === "string" ? args.path : "";
+      if (!p) return errText("missing path");
+      const resolved = resolveFileArg(store, p);
+      if (!resolved) return errText(`not found: ${p}`);
+      const m = store.getMetrics(resolved);
+      if (!m) {
+        return jsonText({ path: resolved, message: "metrics not computed; run: qnode metrics" });
+      }
+      return jsonText(m);
     }
     if (name === "find_by_distance") {
       const p = typeof args.path === "string" ? args.path : "";

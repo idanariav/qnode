@@ -8,12 +8,13 @@ import { existsSync, readFileSync } from "fs";
 import { isAbsolute, resolve } from "path";
 import matter from "gray-matter";
 import type { Category } from "./categories.js";
-import type { EdgeRow, NodeRow, Store } from "./store.js";
+import type { EdgeRow, MetricsRow, NodeRow, Store } from "./store.js";
 
 export interface NodeDetail {
   node: NodeRow;
   outgoing: EdgeRow[];
   incoming: EdgeRow[];
+  metrics: MetricsRow | null;
 }
 
 export function resolveFileArg(store: Store, arg: string): string | null {
@@ -32,6 +33,7 @@ export function getNodeDetail(store: Store, path: string): NodeDetail | null {
     node,
     outgoing: store.outgoing(path),
     incoming: store.incoming(path),
+    metrics: store.getMetrics(path),
   };
 }
 
