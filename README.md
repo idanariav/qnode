@@ -2,47 +2,22 @@
 
 Query Nodes — link-graph indexing and querying for markdown knowledge vaults.
 
-Answers questions that existing search tools don't handle well:
+Full-text search surfaces documents. Vector search surfaces meaning. Neither understands **how** your notes connect. qnode builds a typed, directional graph from your wikilinks and answers structural graph questions: who are the siblings of this idea? what's the shortest path between two concepts? which notes are most central to my knowledge base?
 
-1. **Siblings of X** — files that share a topical parent with X.
-2. **Supporters / opposers of X** — files that argue for or against X via categorized links.
-3. **Distance from X to Y** — how many link hops separate two notes.
-4. **Neighborhood of X** — all notes within N hops, optionally filtered by type and excluding already-linked notes.
-5. **Network importance of X** — PageRank, betweenness centrality, clustering coefficient, and community assignment across the whole graph.
+---
 
-## Why
+## Quick Start
 
-Full-text search surfaces documents. Vector search surfaces meaning. Neither understands **how** your notes connect. qnode builds a typed, directional graph from your wikilinks and answers graph questions — not text questions.
+### Install
 
-## The 7 Link Categories
+**Via Claude Code marketplace (recommended):**
 
-Every edge between two notes is classified into one of seven types:
+```sh
+claude plugin marketplace add idanariav/pkm-query-tools
+claude plugin install qnode@pkm-query-tools
+```
 
-| Category          | Meaning                           |
-|-------------------|-----------------------------------|
-| **Up**            | topic / parent                    |
-| **Down**          | child idea                        |
-| **Right**         | supportive idea                   |
-| **Left**          | opposing idea                     |
-| **In**            | deep-dive into a mentioned idea   |
-| **Out**           | related idea from another field   |
-| **Uncategorized** | plain body wikilink               |
-
-You tell qnode which frontmatter keys and inline-field names map to which category. All mappings live in one YAML file (`~/.config/qnode/index.yml`) and can differ per collection. qnode ships with sensible defaults that match common Obsidian / Dataview conventions, but nothing is hard-coded.
-
-## Syntax qnode understands
-
-- **Frontmatter**: YAML lists or scalars of wikilinks, e.g. `Topic: ["[[Parent]]"]`.
-- **Inline-field annotations** (Dataview-style) immediately before a wikilink: `(Supports:: [[target]])`, `(Opposes:: [[target]])`, `(Related:: [[target]])`, etc.
-- **Plain wikilinks** in the body: `[[target]]`, `[[target|alias]]`, `[[target#section]]`, `[[target^block]]` — classified as **Uncategorized**.
-
-Unresolved links (wikilinks with no matching file) are still recorded; they just have no destination path.
-
-## Collections
-
-A **collection** is a scoped view of your vault. Registering a collection tells qnode which folder to treat as "in-scope". External files that link into your collection are recorded as endpoints but are not themselves traversed — this keeps the graph focused and fast on large vaults.
-
-## Install
+**Via npm:**
 
 ```sh
 npm install -g @idan_ariav/qnode
@@ -50,204 +25,318 @@ npm install -g @idan_ariav/qnode
 
 Requires Node ≥ 22.
 
-## Quickstart
+### Setup and first queries
 
 ```sh
-# 1. Register a collection (any folder containing .md files)
-qnode collection add <path-to-notes> --name <collection-name> \
-      [--vault-root <path>]    # optional: parent dir for resolving cross-folder wikilinks
+# 1. Register a folder of markdown notes
+qnode collection add ~/notes/claims --name claims
 
-# 2. Build the index
-qnode index --collection <collection-name>
+# 2. Build the graph index
+qnode index --collection claims
 
-# 3. (Optional) customise field → category mappings
-qnode fields set up-frontmatter "Topic,Source"          # global
-qnode fields set right-inline "Supports,Backs" --collection my-notes  # per-collection
-qnode fields get --collection my-notes                  # inspect effective mappings
+# 3. Query the graph
+qnode siblings "epistemology.md"              # notes that share a parent topic
+qnode neighbors "free-will.md" --category Right  # notes that support this idea
+qnode find-by-distance "consciousness.md" --max-distance 2  # nearby notes
+qnode distance "determinism.md" "agency.md"   # how many hops apart?
+qnode path "rationalism.md" "empiricism.md"   # shortest connection path
 
-# 4. Ask questions
-qnode siblings         <file.md>
-qnode neighbors        <file.md> --category Right --direction in
-qnode distance         <file-a.md> <file-b.md>
-qnode path             <file-a.md> <file-b.md>
-qnode find-by-distance <file.md> --file-type claim --max-distance 2
-qnode get              <file.md>
-qnode status
-
-# 5. (Optional) compute network metrics
-qnode metrics compute --collection <collection-name>
-qnode metrics show --top 20 --sort pagerank
+# 4. Compute network metrics (optional)
+qnode metrics compute --collection claims
+qnode metrics show --top 20 --sort pagerank   # most central notes
 ```
 
-## Command reference
+Once installed as an MCP plugin, you can ask Claude Code questions like:
+- *"Find all claims within 2 hops of 'epistemology' that I haven't linked yet."*
+- *"What's the shortest conceptual path from 'free will' to 'determinism'?"*
+- *"Which notes are the most central hubs in my knowledge base?"*
 
+---
+
+## Use Cases
+
+qnode answers structural questions about your knowledge graph that search tools can't. It's designed for personal knowledge management workflows — Zettelkasten, Obsidian vaults, research notes — where the connections between ideas matter as much as the content.
+
+**Find related ideas you've already written about**
+> "Show me all claims within 2 hops of this note that I haven't linked yet."
+> `qnode find-by-distance "my-note.md" --max-distance 2`
+
+**Discover sibling ideas — notes that share a common parent topic**
+> "What other claims live under the same topic as this one?"
+> `qnode siblings "confirmation-bias.md"`
+
+**Trace the conceptual chain between two ideas**
+> "How does 'rationalism' connect to 'pragmatism' through my notes?"
+> `qnode path "rationalism.md" "pragmatism.md"`
+
+**Find supporters and challengers of a claim**
+> "Which notes argue for or against this idea?"
+> `qnode neighbors "free-will.md" --category Right`
+> `qnode neighbors "free-will.md" --category Left`
+
+**Identify the most central nodes in your vault**
+> "Which ideas appear most often on the paths between other ideas?"
+> `qnode metrics show --sort betweenness --top 20`
+
+**Understand community structure**
+> "Which clusters of notes form their own densely linked sub-graphs?"
+> `qnode metrics show --sort community`
+
+---
+
+## Commands
+
+### Collection management
+
+Collections are scoped views into your vault. Register any folder of markdown files as a collection.
+
+```sh
+qnode collection add <path> --name <name> [--pattern <glob>] [--vault-root <path>]
 ```
-qnode collection add <path> --name <n> [--pattern <glob>] [--vault-root <path>]
+
+- `--pattern`: glob for which files to include (default: `**/*.md`)
+- `--vault-root`: parent directory for resolving cross-folder wikilinks
+
+```sh
+qnode collection list                   # show all registered collections
+qnode collection remove <name>          # unregister a collection
+qnode collection rename <old> <new>     # rename a collection
+```
+
+**Example:**
+```sh
+qnode collection add ~/notes/claims --name claims --vault-root ~/notes
+qnode collection add ~/notes/books --name books --vault-root ~/notes
 qnode collection list
-qnode collection remove <name>
-qnode collection rename <old> <new>
-
-qnode fields get   [--collection <n>]                Show effective field→category mappings
-qnode fields set   <field> <val,val,...>              Set a field (comma-separated values)
-                   [--collection <n>]                Scoped to collection, or global if omitted
-qnode fields reset [--collection <n>]                Remove overrides, restore inherited defaults
-
-qnode index   [--collection <n>]                     Walk and (re)build the graph
-qnode status  [--collection <n>]                     Counts by category
-
-qnode get              <file>                        All incoming + outgoing edges for a node
-qnode neighbors        <file> [--category <cat>]
-                              [--direction out|in|both]   Default: both
-                              [--json]
-qnode siblings         <file> [--shared-min N]       Shares ≥N Up parents (default 1)
-qnode distance         <a> <b> [--max N] [--include-external]
-qnode path             <a> <b> [--max N] [--include-external]
-qnode find-by-distance <file> [--max-distance N]     All nodes within N hops (default 2)
-                              [--file-type <tag>]    Filter by frontmatter type/tags field
-                              [--include-existing]   Include directly-linked nodes (excluded by default)
-                              [--include-external]   Traverse through out-of-collection files
-                              [--json]
-
-qnode metrics compute [--collection <n>]             Compute network metrics and store in index
-qnode metrics show    [--collection <n>]             Display stored metrics (requires compute first)
-                      [--top N]                      Show only top N nodes
-                      [--sort pagerank|betweenness|clustering_coeff|in_degree|out_degree|community]
-                      [--min-<field> N]              Only nodes where field ≥ N (e.g. --min-in_degree 50)
-                      [--max-<field> N]              Only nodes where field ≤ N
-                      [--json]
-
-qnode mcp                                            Start stdio MCP server
 ```
 
-## Network metrics
+---
 
-`qnode metrics compute` analyses the link graph and stores five metrics per node. Run it after `qnode index`; re-run whenever you re-index.
+### Indexing
+
+```sh
+qnode index [--collection <name>]       # walk files and build the graph
+qnode status [--collection <name>]      # show edge counts by category
+```
+
+Run `index` after adding a collection or when your notes change. `status` gives a quick summary of what's in the graph.
+
+---
+
+### Field mappings
+
+qnode classifies each link into one of seven categories based on the frontmatter key or inline annotation used. You can configure which field names map to which category.
+
+```sh
+qnode fields get [--collection <name>]                    # show current mappings
+qnode fields set <field> <val,val,...> [--collection <name>]  # set a mapping
+qnode fields reset [--collection <name>]                  # restore defaults
+```
+
+Valid `<field>` names: `up-frontmatter`, `down-frontmatter`, `right-inline`, `left-inline`, `in-inline`, `out-inline`.
+
+**Examples:**
+```sh
+qnode fields get                                  # show global defaults
+qnode fields get --collection claims              # show effective mappings for a collection
+qnode fields set up-frontmatter "Topic,Parent"    # global: treat Topic and Parent as Up links
+qnode fields set right-inline "Supports,Backs" --collection claims  # per-collection override
+qnode fields reset --collection claims            # remove per-collection overrides
+```
+
+Default mappings:
+| Field | Default keys |
+|---|---|
+| `up-frontmatter` | `Topic` |
+| `down-frontmatter` | `Down` |
+| `right-inline` | `Supports`, `Supported` |
+| `left-inline` | `Opposes`, `Weakens` |
+| `in-inline` | `Jump` |
+| `out-inline` | `Related`, `Reminds`, `Aka` |
+
+---
+
+### Graph queries
+
+**`qnode get <file>`**
+Returns all incoming and outgoing edges for a node, plus network metrics if computed.
+```sh
+qnode get "epistemology.md"
+```
+
+**`qnode neighbors <file>`**
+Returns notes directly linked to or from this file, optionally filtered by category and direction.
+```sh
+qnode neighbors "free-will.md"
+qnode neighbors "free-will.md" --category Right            # only supporters
+qnode neighbors "free-will.md" --category Left --direction in  # notes that oppose this one
+qnode neighbors "free-will.md" --json                      # machine-readable output
+```
+Options: `--category <Up|Down|Right|Left|In|Out|Uncategorized>`, `--direction <out|in|both>` (default: both), `--json`
+
+**`qnode siblings <file>`**
+Returns notes that share at least one Up (topic/parent) link with this file.
+```sh
+qnode siblings "confirmation-bias.md"
+qnode siblings "confirmation-bias.md" --shared-min 2   # must share at least 2 parents
+```
+Options: `--shared-min N` (default: 1)
+
+**`qnode distance <a> <b>`**
+Returns the shortest-path distance in hops between two notes.
+```sh
+qnode distance "rationalism.md" "empiricism.md"
+qnode distance "rationalism.md" "empiricism.md" --max 5 --include-external
+```
+Options: `--max N`, `--include-external`
+
+**`qnode path <a> <b>`**
+Returns the full shortest path between two notes as a list of file paths.
+```sh
+qnode path "rationalism.md" "pragmatism.md"
+qnode path "rationalism.md" "pragmatism.md" --max 6 --include-external
+```
+Options: `--max N`, `--include-external`
+
+**`qnode find-by-distance <file>`**
+Returns all notes reachable within N hops, with optional filtering. By default, directly-linked notes are excluded (surfacing less-obvious connections).
+```sh
+qnode find-by-distance "consciousness.md"
+qnode find-by-distance "consciousness.md" --max-distance 3
+qnode find-by-distance "consciousness.md" --file-type claim --max-distance 2
+qnode find-by-distance "consciousness.md" --include-existing --include-external --json
+```
+Options: `--max-distance N` (default: 2), `--file-type <tag>` (filter by frontmatter `type`/`tags`), `--include-existing` (include directly-linked notes), `--include-external`, `--json`
+
+---
+
+### Network metrics
+
+```sh
+qnode metrics compute [--collection <name>]
+```
+Computes and stores five metrics per node. Run after `qnode index`; re-run after re-indexing.
+
+```sh
+qnode metrics show [--collection <name>] [--top N] [--sort <metric>]
+                   [--min-<field> N] [--max-<field> N] [--json]
+```
+
+**Examples:**
+```sh
+qnode metrics compute --collection claims
+qnode metrics show --top 20 --sort pagerank
+qnode metrics show --sort betweenness --min-in_degree 10
+qnode metrics show --sort community --json
+```
 
 | Metric | Description |
 |---|---|
-| `in_degree` | Number of distinct resolved sources pointing at this node |
-| `out_degree` | Number of distinct resolved destinations this node points at |
-| `pagerank` | Directed PageRank (d = 0.85) — measures how often a random walk lands here |
-| `betweenness` | Undirected betweenness centrality — how often this node lies on shortest paths between others |
-| `clustering_coeff` | Undirected local clustering coefficient — how densely connected this node's neighbors are |
-| `community` | Community ID assigned by label propagation — nodes with the same ID form a densely linked cluster |
+| `in_degree` | Number of notes pointing at this node |
+| `out_degree` | Number of notes this node points at |
+| `pagerank` | How often a random walk lands here — overall importance |
+| `betweenness` | How often this node lies on shortest paths between others — bridge role |
+| `clustering_coeff` | How densely connected this node's neighbors are |
+| `community` | Cluster ID from label propagation — notes in the same cluster link densely together |
 
-Metrics are scoped to in-collection nodes only; edges to external files are excluded. Each metric is stored in the index and returned by `qnode get` and the MCP `get` / `metrics` tools.
+---
 
-Valid `<field>` names for `fields set`: `up-frontmatter`, `down-frontmatter`, `right-inline`, `left-inline`, `in-inline`, `out-inline`.
-
-## Configuration
-
-qnode is driven by a single YAML file at `~/.config/qnode/index.yml` (override with `QNODE_CONFIG_DIR`). Example:
-
-```yaml
-collections:
-  my-notes:
-    path: /absolute/path/to/notes
-    pattern: "**/*.md"
-    ignore: ["Templates/**", "Archive/**"]
-    vault_root: /absolute/path/to/vault   # optional
-    # Per-collection overrides (optional):
-    # category_fields:
-    #   up_frontmatter: [Parent, Topic]
-    #   right_inline:   [Supports, Backs]
-
-category_fields:                                     # global defaults
-  up_frontmatter:   [Topic]
-  down_frontmatter: [Down]
-  right_inline:     [Supports, Supported]
-  left_inline:      [Opposes, Weakens]
-  in_inline:        [Jump]
-  out_inline:       [Related, Reminds, Aka]
-```
-
-Any field not listed in `category_fields` is ignored. Plain wikilinks (no prefix) are always **Uncategorized**.
-
-## Claude Code MCP Integration
-
-Run qnode as a Model Context Protocol server to enable Claude Code agents to query your knowledge graph.
-
-### Quick Start
-
-```bash
-# Install from npm (if not already installed)
-npm install -g @idan_ariav/qnode
-
-# Add the pkm-query-tools marketplace (one command)
-claude plugin marketplace add idanariav/pkm-query-tools
-
-# Install the plugin
-claude plugin install qnode@pkm-query-tools
-
-# Verify it's connected
-/mcp list
-```
-
-You should see `qnode` in the list of active MCP servers.
-
-### Manual Setup (if marketplace doesn't work)
-
-If the marketplace approach has issues, configure directly in `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "qnode": {
-      "command": "qnode",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-Then verify with `/mcp list`.
-
-### Using qnode in Claude Code Agents
-
-Once registered, agents can query your knowledge graph directly:
-
-```
-Find all notes within 2 hops of "epistemology.md" that are of type "claim".
-Show me the shortest path from "artificial-intelligence.md" to "consciousness.md".
-What are the strongest nodes by PageRank in my knowledge base?
-```
-
-The agent will:
-1. Use `qnode get` to fetch node details and metrics
-2. Use `qnode distance` / `qnode path` for graph traversal
-3. Use `qnode find_by_distance` for filtered neighborhood searches
-4. Use `qnode status` to understand your index
-
-### MCP Tools Reference
-
-`qnode mcp` exposes 8 tools:
-
-- `siblings(path, shared_min?, collection?)` — Files sharing one or more Up (topic/parent) links
-- `neighbors(path, category?, direction?, collection?)` — Incoming/outgoing categorized edges
-- `distance(from, to, max?, include_external?)` — Shortest-path distance (in hops)
-- `path(from, to, max?, include_external?)` — Shortest path as a list of file paths
-- `find_by_distance(path, max_distance?, file_type?, exclude_existing?, include_external?)` — All nodes within N hops, optionally filtered by `type` field or hierarchical tags
-- `get(path)` — Full node detail: incoming/outgoing edges, metrics, title
-- `metrics(path)` — Network metrics (PageRank, betweenness, clustering coefficient, in/out degree, community ID)
-- `status(collection?)` — Index counts by category and collection
-
-### Running the MCP Server Standalone
-
-For debugging or custom integrations:
+### MCP server
 
 ```sh
-qnode mcp
+qnode mcp    # Start the MCP server (stdio transport)
 ```
 
-qnode uses stdio transport, compatible with Claude Code and all standard MCP clients.
+Exposes 8 tools for use by Claude Code agents:
 
-## How it compares to other tools
+| Tool | Description |
+|---|---|
+| `get(path)` | Full node detail: edges, metrics, title |
+| `neighbors(path, category?, direction?, collection?)` | Categorized incoming/outgoing edges |
+| `siblings(path, shared_min?, collection?)` | Notes sharing a topic/parent |
+| `distance(from, to, max?, include_external?)` | Shortest-path hop count |
+| `path(from, to, max?, include_external?)` | Shortest path as file list |
+| `find_by_distance(path, max_distance?, file_type?, exclude_existing?, include_external?)` | Neighborhood search with filters |
+| `metrics(path)` | PageRank, betweenness, clustering, degree, community |
+| `status(collection?)` | Index counts by category and collection |
 
-| Tool         | What it sees                        | What qnode adds                                   |
-|--------------|-------------------------------------|---------------------------------------------------|
-| Full-text / vector search | document content         | typed edges and graph traversal                    |
-| `obsidian-cli` / core backlinks | raw link endpoints   | semantic categorization + "uncategorized" bucket   |
-| Dataview     | inline fields per-note, per-key     | cross-note siblings, distance, path, typed queries |
+---
+
+## Methodology
+
+### How links are classified
+
+qnode reads two kinds of link annotations from your markdown:
+
+- **Frontmatter fields**: YAML lists or scalars of wikilinks. `Topic: ["[[Parent]]"]` creates an Up edge from the current file to `Parent`.
+- **Inline-field annotations** (Dataview-style): a key immediately before a wikilink in the body. `(Supports:: [[target]])` creates a Right edge. `(Opposes:: [[target]])` creates a Left edge.
+- **Plain wikilinks** in the body (`[[target]]`, `[[target|alias]]`, `[[target#section]]`) are recorded as **Uncategorized** edges.
+
+Every edge is typed into one of seven categories:
+
+| Category | Meaning |
+|---|---|
+| **Up** | topic / parent — this note belongs to that topic |
+| **Down** | child idea — that note is a sub-idea of this one |
+| **Right** | supporter — that note argues for this one |
+| **Left** | opponent — that note argues against this one |
+| **In** | deep-dive — that note expands on a concept mentioned here |
+| **Out** | related idea from another domain |
+| **Uncategorized** | plain wikilink with no semantic annotation |
+
+### Graph construction
+
+After parsing, qnode stores nodes and edges in a local SQLite database (`~/.cache/qnode/index.sqlite`). Each node is a file; each edge is a directed, typed link between two files. Unresolved wikilinks (no matching file) are still stored — they just have no resolved destination path. Files outside the registered collection are stored as external endpoints and not traversed.
+
+### Graph traversal
+
+- **`neighbors`**: direct edge lookup — O(1) in the SQLite index.
+- **`siblings`**: finds all files sharing at least one Up-edge target, via a set-intersection query.
+- **`distance` / `path`**: bidirectional BFS from both endpoints, meeting in the middle for efficiency.
+- **`find-by-distance`**: standard BFS up to depth N with optional tag/type filtering at each hop.
+
+### Network metrics
+
+`qnode metrics compute` runs graph-wide analysis using the full edge set:
+
+- **PageRank**: directed, damping factor 0.85. Measures how much "link authority" flows into each node via the directed graph.
+- **Betweenness centrality**: undirected. Counts how many shortest paths between all pairs of nodes pass through each node — identifies bridges and connectors.
+- **Clustering coefficient**: undirected local measure. Fraction of a node's neighbors that are also connected to each other — identifies tightly-knit clusters.
+- **Community detection**: label propagation on the undirected graph. Nodes converge to a shared community ID when they are densely interconnected.
+
+Metrics are scoped to in-collection nodes; edges to external files are excluded from computation.
+
+---
+
+## Privacy and Security
+
+qnode is entirely local. No data leaves your device.
+
+- **No network calls**: the indexer reads your markdown files and writes to a local SQLite database. There are no external API calls, no telemetry, no cloud sync.
+- **No model or embedding service**: graph traversal and metrics are computed with classical graph algorithms — BFS, PageRank, label propagation — entirely in process.
+- **Your notes stay on disk**: the SQLite index (`~/.cache/qnode/index.sqlite`) and config (`~/.config/qnode/index.yml`) are written only to your local filesystem.
+- **MCP transport is stdio**: when running as an MCP server, qnode communicates over standard input/output to the local MCP client. No network port is opened.
+
+---
+
+## Other Plugins
+
+qnode is part of the **pkm-query-tools** marketplace plugin, alongside:
+
+| Plugin | Description |
+|---|---|
+| **qimg** | Image indexing and visual search — find images by content, similarity, or semantic query |
+| **qvoid** | Semantic clustering and void detection — find gaps and blind spots in your knowledge graph |
+
+Install the whole suite:
+
+```sh
+claude plugin marketplace add idanariav/pkm-query-tools
+claude plugin install qimg@pkm-query-tools
+claude plugin install qvoid@pkm-query-tools
+```
+
+---
 
 ## License
 
