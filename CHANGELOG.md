@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-25
+
+### Added
+- **Network metrics** — `qnode metrics` command exposes PageRank, in-degree, out-degree, and total-degree for nodes in the graph
+- **Metrics filtering** — `--collection` and `--top N` filters on the `metrics` command to scope results per collection or limit output
+- **Claude Code marketplace** — Added `.claude-plugin/marketplace.json` so qnode is installable directly via the Claude Code plugin marketplace
+
+### Changed
+- Metrics output splits computation from display for cleaner separation of concerns
+
 ## [0.1.0] - 2026-04-19
 
 Initial release.
