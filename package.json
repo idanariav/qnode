@@ -1,6 +1,6 @@
 {
   "name": "@idan_ariav/qnode",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Query Nodes - link-graph indexing and querying for markdown knowledge vaults (siblings, supporters, distance) with 7 semantic link categories",
   "type": "module",
   "main": "dist/index.js",
