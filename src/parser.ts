@@ -5,11 +5,27 @@
  *   1. Frontmatter keys (e.g. Topic:) → Up / Down edges.
  *   2. Inline-annotated wikilinks: (Supports:: [[target]]) → Right/Left/In/Out.
  *   3. Residual body wikilinks not consumed by step 2 → Uncategorized.
+ *
+ * Body parsing uses remark-parse with micromark extensions for [[wikilinks]]
+ * and (Key:: [[value]]) inline fields, so code spans and code blocks are
+ * automatically excluded from link extraction.
  */
 
 import matter from "gray-matter";
+import { unified } from "unified";
+import remarkParse from "remark-parse";
+import { visit } from "unist-util-visit";
+import type { Root } from "mdast";
 import type { Category, CategoryFields } from "./categories.js";
 import { frontmatterKeyIndex, inlineKeyIndex } from "./categories.js";
+import {
+  wikilinkSyntax,
+  wikilinkFromMarkdown,
+  inlineFieldSyntax,
+  inlineFieldFromMarkdown,
+  type WikilinkNode,
+  type InlineFieldNode,
+} from "./remark-extensions.js";
 
 export interface ParsedEdge {
   /** Raw wikilink target as written (without the [[ ]] brackets). */
@@ -29,17 +45,13 @@ export interface ParsedFile {
   edges: ParsedEdge[];
 }
 
-const WIKILINK_RE = /\[\[([^\[\]\n]+?)\]\]/g;
-/**
- * Matches an inline-annotated wikilink with optional closing paren:
- *   (Supports:: [[target]])
- *   (Supports:: [[target|alias]])
- * Also tolerates no leading paren when followed by the `::` pattern.
- */
-const INLINE_ANNOTATION_RE =
-  /\(([A-Za-z][A-Za-z_-]*)::\s*\[\[([^\[\]\n]+?)\]\]\s*\)?/g;
-
 const CONTEXT_WINDOW = 80;
+
+// Build the processor once and reuse it.
+// remark-parse reads micromark/mdast extensions from the processor data store.
+const processor = unified().use(remarkParse);
+processor.data("micromarkExtensions", [wikilinkSyntax, inlineFieldSyntax]);
+processor.data("fromMarkdownExtensions", [wikilinkFromMarkdown, inlineFieldFromMarkdown]);
 
 function splitAlias(raw: string): { target: string; alias: string | null } {
   const pipe = raw.indexOf("|");
@@ -47,23 +59,23 @@ function splitAlias(raw: string): { target: string; alias: string | null } {
   return { target: raw.slice(0, pipe).trim(), alias: raw.slice(pipe + 1).trim() };
 }
 
-function contextAround(text: string, start: number, end: number): string {
-  const from = Math.max(0, start - CONTEXT_WINDOW);
-  const to = Math.min(text.length, end + CONTEXT_WINDOW);
+function contextAround(text: string, startOffset: number, endOffset: number): string {
+  const from = Math.max(0, startOffset - CONTEXT_WINDOW);
+  const to = Math.min(text.length, endOffset + CONTEXT_WINDOW);
   return text.slice(from, to).replace(/\s+/g, " ").trim();
 }
 
-function lineAt(text: string, offset: number): number {
-  let line = 1;
-  for (let i = 0; i < offset && i < text.length; i++) {
-    if (text.charCodeAt(i) === 10) line++;
-  }
-  return line;
+/**
+ * Strip section/block suffixes from a wikilink target.
+ */
+function normalizeTarget(raw: string): string {
+  return raw.split("#")[0]!.split("^")[0]!.trim();
 }
 
 /**
  * Walk frontmatter values recursively and extract every wikilink string found
- * inside string scalars. Yields [keyPath, rawWikilink].
+ * inside string scalars. Frontmatter is already parsed YAML so we apply the
+ * wikilink pattern only to clean string values, not raw markdown.
  */
 function* frontmatterWikilinks(
   data: unknown,
@@ -86,15 +98,6 @@ function* frontmatterWikilinks(
   }
 }
 
-/**
- * Strip the wikilink target of section/block suffixes for storage as dst_target.
- * We keep the alias separately — it's not part of the target identity.
- */
-function normalizeTarget(raw: string): string {
-  const base = raw.split("#")[0]!.split("^")[0]!.trim();
-  return base;
-}
-
 export function parse(
   content: string,
   fields: CategoryFields,
@@ -106,7 +109,6 @@ export function parse(
 
   // Phase 1 — frontmatter
   for (const hit of frontmatterWikilinks(parsed.data)) {
-    // Match top-level key (or first segment of a nested key path).
     const topKey = hit.key.split(".")[0]!;
     const category = fmKeys.get(topKey);
     if (!category) continue;
@@ -122,60 +124,52 @@ export function parse(
     });
   }
 
-  // Phase 2 + 3 — body pass. The body starts after the frontmatter block;
-  // gray-matter gives us `content` which is exactly the body.
+  // Phase 2 + 3 — body (parsed with remark + micromark extensions)
   const body = parsed.content;
+  const tree = processor.parse(body) as Root;
 
-  // Track [startOffset, endOffset] of annotated wikilinks so plain-wikilink
-  // pass can skip them.
-  const consumed: Array<[number, number]> = [];
+  // Phase 2: inline field annotations → categorized edges.
+  // The inline field tokenizer handles [[...]] internally, so those wikilinks
+  // do NOT appear as separate `wikilink` nodes — no double-counting needed.
+  visit(tree, "inlineField", (node) => {
+    const fieldNode = node as unknown as InlineFieldNode;
+    const target = normalizeTarget(fieldNode.target);
+    if (!target) return;
 
-  INLINE_ANNOTATION_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = INLINE_ANNOTATION_RE.exec(body)) !== null) {
-    const fieldKey = m[1]!;
-    const category = inlineKeys.get(fieldKey);
-    if (!category) continue; // Unknown inline-field key: leave for plain-wikilink pass.
-    const rawTarget = m[2]!;
-    const { target, alias } = splitAlias(rawTarget);
-    if (!target) continue;
-    const start = m.index;
-    const end = start + m[0].length;
-    consumed.push([start, end]);
+    const startOffset = fieldNode.position?.start.offset ?? 0;
+    const endOffset = fieldNode.position?.end.offset ?? 0;
+    const category = inlineKeys.get(fieldNode.key);
+
     edges.push({
-      target: normalizeTarget(target),
-      category,
-      fieldKey,
-      line: lineAt(body, start),
-      context: contextAround(body, start, end),
-      alias,
+      target,
+      category: category ?? "Uncategorized",
+      fieldKey: category ? fieldNode.key : null,
+      line: fieldNode.position?.start.line ?? 1,
+      context: contextAround(body, startOffset, endOffset),
+      alias: fieldNode.alias,
     });
-  }
+  });
 
-  // Sort consumed ranges once so we can binary-skip.
-  consumed.sort((a, b) => a[0] - b[0]);
+  // Phase 3: plain wikilinks → Uncategorized edges.
+  visit(tree, "wikilink", (node) => {
+    const wlNode = node as unknown as WikilinkNode;
+    const target = normalizeTarget(wlNode.target);
+    if (!target) return;
 
-  WIKILINK_RE.lastIndex = 0;
-  let w: RegExpExecArray | null;
-  while ((w = WIKILINK_RE.exec(body)) !== null) {
-    const start = w.index;
-    const end = start + w[0].length;
-    // Skip if fully inside a consumed annotation range.
-    const inside = consumed.some(([a, b]) => start >= a && end <= b);
-    if (inside) continue;
-    const { target, alias } = splitAlias(w[1]!);
-    if (!target) continue;
+    const startOffset = wlNode.position?.start.offset ?? 0;
+    const endOffset = wlNode.position?.end.offset ?? 0;
+
     edges.push({
-      target: normalizeTarget(target),
+      target,
       category: "Uncategorized",
       fieldKey: null,
-      line: lineAt(body, start),
-      context: contextAround(body, start, end),
-      alias,
+      line: wlNode.position?.start.line ?? 1,
+      context: contextAround(body, startOffset, endOffset),
+      alias: wlNode.alias,
     });
-  }
+  });
 
-  // Title fallback: first ATX heading in body, else frontmatter title.
+  // Title: first H1 in body, else frontmatter title field.
   let title: string | null = null;
   const h1 = /^#\s+(.+)$/m.exec(body);
   if (h1) title = h1[1]!.trim();
