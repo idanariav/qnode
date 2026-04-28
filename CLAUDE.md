@@ -1,4 +1,10 @@
-# qnode — Developer Guide
+# qnode
+
+Build and query a graph index of wikilink relationships across Obsidian-style vaults — with an MCP server for Claude Code.
+
+## General instructions
+
+When refactoring commands (renaming, adding/removing params) — review CLAUDE.md, docs/, and README.md to ensure no stale references remain.
 
 ## Commands
 
@@ -12,8 +18,8 @@ qnode fields get   [--collection <n>]
 qnode fields set   <field> <val,val,...> [--collection <n>]
 qnode fields reset [--collection <n>]
 
-qnode index   [--collection <n>]
-qnode status  [--collection <n>]
+qnode index   [--collection <n>]          # Parse files and populate SQLite index
+qnode status  [--collection <n>]          # Node/edge counts by category
 
 qnode get              <file>
 qnode neighbors        <file> [--category <cat>] [--direction out|in|both] [--json]
@@ -21,60 +27,44 @@ qnode siblings         <file> [--shared-min N]
 qnode distance         <a> <b> [--max N] [--include-external]
 qnode path             <a> <b> [--max N] [--include-external]
 qnode find-by-distance <file> [--max-distance N] [--file-type <tag>] [--include-existing] [--include-external] [--json]
+qnode metrics compute  [--collection <n>]
+qnode metrics show     [--collection <n>] [--sort <key>] [--min-<field> N] [--json]
 
-qnode mcp                                    # Start MCP server (stdio)
+qnode mcp                                 # Start MCP server (stdio transport)
 ```
 
-## Development Setup
+## Development
 
 ```sh
-npm install
-npm run build        # Compile TypeScript → dist/
-npm test             # Run tests with vitest
+npx tsx src/cli/qnode.ts <command>   # Run from source (no build needed)
+npm run build                        # Compile TypeScript → dist/
+npm test                             # Run test suite (vitest, in-memory SQLite)
 ```
 
-Run from source without building (useful during development):
+## Important: Do NOT run automatically
 
-```sh
-npx tsx src/cli/qnode.ts <command>
-```
+- Never run `qnode index` automatically — it modifies the SQLite index
+- Write out commands for the user to run manually
 
-## Project Structure
+## Do NOT compile unnecessarily
 
-```
-src/
-  cli/qnode.ts      # CLI entry point and command dispatch
-  mcp/server.ts     # MCP server (exposes graph query tools)
-  store.ts          # SQLite store: nodes, edges, collection management
-  graph.ts          # Graph traversal: BFS, distance, path, siblings
-  indexer.ts        # File walker: parses notes and populates the store
-  parser.ts         # Wikilink + inline-field parser
-  resolver.ts       # Wikilink → file path resolution
-  categories.ts     # Link category definitions and field mappings
-  collections.ts    # Collection config types and validation
-  index.ts          # Public API re-exports
-test/
-  ...               # vitest unit tests
-```
+Use `npx tsx src/cli/qnode.ts <command>` during development to avoid repeated builds. Only run `npm run build` when testing the compiled output or before publishing.
 
-## Config & Cache
+## Releasing
 
-- Config: `~/.config/qnode/index.yml` (override with `QNODE_CONFIG_DIR`)
-- DB: `~/.cache/qnode/index.sqlite` (override with `QNODE_CACHE_DIR`)
+Use `/npm-release` to cut a release.
 
-## Running Tests
+- Add changelog entries under `## [Unreleased]` **as you make changes**
+- The release script renames `[Unreleased]` → `[X.Y.Z] - date` at release time
 
-```sh
-npm test
-```
+## Architecture
 
-Tests use vitest and create in-memory SQLite databases — no external services required.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full module map, end-to-end data flow, key types, and config paths.
 
-## Publishing
+Subsystem docs:
 
-```sh
-npm run build
-npm publish
-```
-
-Requires `npm login` and `publishConfig.access: "public"` in `package.json` (already set).
+| Topic | File |
+|-------|------|
+| File discovery, parsing, path resolution, SQLite write | [docs/INDEXING.md](docs/INDEXING.md) |
+| Graph traversal, BFS, metrics, CLI output formats | [docs/QUERYING.md](docs/QUERYING.md) |
+| MCP tool schemas, handler pattern, adding new tools | [docs/MCP.md](docs/MCP.md) |
