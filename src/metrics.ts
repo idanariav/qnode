@@ -1,3 +1,5 @@
+import { UndirectedGraph } from "graphology";
+import * as louvainPkg from "graphology-communities-louvain";
 import type { MetricsRow, Store } from "./store.js";
 
 interface GraphData {
@@ -165,58 +167,21 @@ function computeClustering(graph: GraphData): Map<string, number> {
   return cc;
 }
 
-function computeCommunity(graph: GraphData, maxIter = 50): Map<string, number> {
+function computeCommunity(graph: GraphData): Map<string, number> {
   const { nodes, adjUnd } = graph;
   if (nodes.length === 0) return new Map();
 
-  // Initialize: each node gets its index as label
-  const label = new Map<string, number>();
-  nodes.forEach((n, i) => label.set(n, i));
-
-  // Deterministic order (sorted) to avoid non-determinism
-  const order = [...nodes].sort();
-
-  for (let iter = 0; iter < maxIter; iter++) {
-    let stable = true;
-    for (const n of order) {
-      const neighbors = adjUnd.get(n) ?? [];
-      if (neighbors.length === 0) continue;
-
-      // Count neighbor label frequencies
-      const freq = new Map<number, number>();
-      for (const nb of neighbors) {
-        const l = label.get(nb) ?? 0;
-        freq.set(l, (freq.get(l) ?? 0) + 1);
-      }
-
-      // Find most frequent label (ties broken by lowest label value)
-      let bestLabel = label.get(n) ?? 0;
-      let bestCount = 0;
-      for (const [l, count] of freq) {
-        if (count > bestCount || (count === bestCount && l < bestLabel)) {
-          bestLabel = l;
-          bestCount = count;
-        }
-      }
-
-      if (bestLabel !== (label.get(n) ?? 0)) {
-        label.set(n, bestLabel);
-        stable = false;
-      }
+  const g = new UndirectedGraph({ multi: false });
+  for (const n of nodes) g.addNode(n);
+  for (const [src, dsts] of adjUnd) {
+    for (const dst of dsts) {
+      if (!g.hasEdge(src, dst)) g.addEdge(src, dst);
     }
-    if (stable) break;
   }
 
-  // Re-index to dense 0-based integers
-  const unique = [...new Set(label.values())].sort((a, b) => a - b);
-  const remap = new Map<number, number>();
-  unique.forEach((l, i) => remap.set(l, i));
-
-  const community = new Map<string, number>();
-  for (const n of nodes) {
-    community.set(n, remap.get(label.get(n) ?? 0) ?? 0);
-  }
-  return community;
+  const louvain = louvainPkg.default as unknown as (g: UndirectedGraph, opts: { getEdgeWeight: null }) => Record<string, number>;
+  const partition = louvain(g, { getEdgeWeight: null });
+  return new Map(Object.entries(partition));
 }
 
 export function computeMetrics(store: Store, collection?: string): MetricsRow[] {
