@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-02
+
+### Fixed
+- Skip npm publish in CI if version already exists (prevents blocked GitHub release creation when a version was manually published before the tag was pushed)
+- Parser now correctly excludes wikilinks inside code spans and fenced code blocks by using proper micromark syntax extensions instead of regex over raw body text
+
+### Changed
+- Community detection in `qnode metrics` switched from hand-rolled label propagation to Louvain modularity maximization — produces stable, meaningful partitions on knowledge graphs with fuzzy community boundaries
+- Added technical docs (`docs/ARCHITECTURE.md`, `docs/INDEXING.md`, `docs/QUERYING.md`, `docs/MCP.md`) as module maps for navigating the codebase
+
 ## [0.2.0] - 2026-04-25
 
 ### Added
