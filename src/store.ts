@@ -10,11 +10,12 @@
  * neighbor lookups, and recursive CTEs work directly over the edges table.
  */
 
-import Database from "better-sqlite3";
+import Database, { type Statement } from "better-sqlite3";
 import { existsSync, mkdirSync, statSync } from "fs";
 import { dirname, join } from "path";
 import { homedir } from "os";
 import type { Category } from "./categories.js";
+import { parseTarget } from "./resolver.js";
 
 export interface CollectionRow {
   name: string;
@@ -244,7 +245,7 @@ export class Store {
     let fixed = 0;
     const txn = this.db.transaction(() => {
       for (const row of unresolved) {
-        const base = row.dst_target.split("#")[0]!.split("^")[0]!.split("|")[0]!.trim();
+        const base = parseTarget(row.dst_target).path;
         const candidates = basenameIndex.get(base.toLowerCase());
         if (candidates && candidates.length === 1) {
           update.run(candidates[0], row.id);
@@ -467,15 +468,13 @@ export class Store {
   }
 
   /**
-   * BFS from `start`, collecting all reachable nodes within `maxHops` hops.
-   * Returns each node with its exact distance. The start node is excluded.
+   * Prepared statement for "all neighbors of a node" (both edge directions,
+   * deduped). With `includeExternal: false`, unresolved (external) targets
+   * are filtered out. Shared by `path()` and `findByDistance()`, which both
+   * BFS over this same adjacency query.
    */
-  findByDistance(
-    start: string,
-    maxHops: number = 2,
-    includeExternal: boolean = false,
-  ): { path: string; distance: number; collection: string | null; title: string | null }[] {
-    const neighborStmt = includeExternal
+  private buildNeighborStmt(includeExternal: boolean): Statement {
+    return includeExternal
       ? this.db.prepare(
           `SELECT DISTINCT other FROM (
              SELECT dst_path AS other FROM edges WHERE src_path = ? AND dst_path IS NOT NULL
@@ -491,6 +490,18 @@ export class Store {
            ) WHERE other IS NOT NULL
              AND EXISTS (SELECT 1 FROM nodes n WHERE n.path = other AND n.collection IS NOT NULL)`,
         );
+  }
+
+  /**
+   * BFS from `start`, collecting all reachable nodes within `maxHops` hops.
+   * Returns each node with its exact distance. The start node is excluded.
+   */
+  findByDistance(
+    start: string,
+    maxHops: number = 2,
+    includeExternal: boolean = false,
+  ): { path: string; distance: number; collection: string | null; title: string | null }[] {
+    const neighborStmt = this.buildNeighborStmt(includeExternal);
 
     const distances = new Map<string, number>();
     distances.set(start, 0);
@@ -550,22 +561,7 @@ export class Store {
   ): string[] | null {
     if (start === end) return [start];
 
-    const neighborStmt = includeExternal
-      ? this.db.prepare(
-          `SELECT DISTINCT other FROM (
-             SELECT dst_path AS other FROM edges WHERE src_path = ? AND dst_path IS NOT NULL
-             UNION
-             SELECT src_path AS other FROM edges WHERE dst_path = ?
-           ) WHERE other IS NOT NULL`,
-        )
-      : this.db.prepare(
-          `SELECT DISTINCT other FROM (
-             SELECT dst_path AS other FROM edges WHERE src_path = ? AND dst_path IS NOT NULL
-             UNION
-             SELECT src_path AS other FROM edges WHERE dst_path = ?
-           ) WHERE other IS NOT NULL
-             AND EXISTS (SELECT 1 FROM nodes n WHERE n.path = other AND n.collection IS NOT NULL)`,
-        );
+    const neighborStmt = this.buildNeighborStmt(includeExternal);
 
     const parent = new Map<string, string | null>();
     parent.set(start, null);

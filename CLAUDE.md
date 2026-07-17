@@ -6,6 +6,8 @@ Build and query a graph index of wikilink relationships across Obsidian-style va
 
 When refactoring commands (renaming, adding/removing params) — review CLAUDE.md, docs/, and README.md to ensure no stale references remain.
 
+Known deferred work is tracked in [.claude/techdebt.md](.claude/techdebt.md) — check it for context before touching an area that might already have an open follow-up, and log new deferred items there when you intentionally punt on something.
+
 ## Commands
 
 ```sh

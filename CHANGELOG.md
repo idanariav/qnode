@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+- Consolidated duplicated "resolve file or error" boilerplate in the CLI and MCP server into shared helpers
+- Consolidated wikilink target normalization (stripping `#section`/`^block`/`|alias`) into a single shared function
+- Consolidated duplicated BFS neighbor-query SQL in `store.ts` into a single prepared-statement builder
+
+### Removed
+- Unused `zod` dependency and dead `getCollection` import in the CLI
+
 ## [0.2.1] - 2026-05-02
 
 ### Fixed

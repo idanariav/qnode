@@ -18,6 +18,7 @@ import { visit } from "unist-util-visit";
 import type { Root } from "mdast";
 import type { Category, CategoryFields } from "./categories.js";
 import { frontmatterKeyIndex, inlineKeyIndex } from "./categories.js";
+import { parseTarget } from "./resolver.js";
 import {
   wikilinkSyntax,
   wikilinkFromMarkdown,
@@ -66,13 +67,6 @@ function contextAround(text: string, startOffset: number, endOffset: number): st
 }
 
 /**
- * Strip section/block suffixes from a wikilink target.
- */
-function normalizeTarget(raw: string): string {
-  return raw.split("#")[0]!.split("^")[0]!.trim();
-}
-
-/**
  * Walk frontmatter values recursively and extract every wikilink string found
  * inside string scalars. Frontmatter is already parsed YAML so we apply the
  * wikilink pattern only to clean string values, not raw markdown.
@@ -115,7 +109,7 @@ export function parse(
     const { target, alias } = splitAlias(hit.target);
     if (!target) continue;
     edges.push({
-      target: normalizeTarget(target),
+      target: parseTarget(target).path,
       category,
       fieldKey: topKey,
       line: 1,
@@ -133,7 +127,7 @@ export function parse(
   // do NOT appear as separate `wikilink` nodes — no double-counting needed.
   visit(tree, "inlineField", (node) => {
     const fieldNode = node as unknown as InlineFieldNode;
-    const target = normalizeTarget(fieldNode.target);
+    const target = parseTarget(fieldNode.target).path;
     if (!target) return;
 
     const startOffset = fieldNode.position?.start.offset ?? 0;
@@ -153,7 +147,7 @@ export function parse(
   // Phase 3: plain wikilinks → Uncategorized edges.
   visit(tree, "wikilink", (node) => {
     const wlNode = node as unknown as WikilinkNode;
-    const target = normalizeTarget(wlNode.target);
+    const target = parseTarget(wlNode.target).path;
     if (!target) return;
 
     const startOffset = wlNode.position?.start.offset ?? 0;

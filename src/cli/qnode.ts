@@ -6,7 +6,6 @@ import { resolve } from "path";
 import {
   addCollection,
   effectiveCategoryFields,
-  getCollection,
   getConfigPath,
   globalCategoryFields,
   isValidCollectionName,
@@ -87,6 +86,25 @@ function flagCategory(v: unknown): Category | undefined {
     process.exit(2);
   }
   return s;
+}
+
+function resolveOrExit(store: Store, arg: string): string {
+  const p = resolveFileArg(store, arg);
+  if (!p) {
+    console.error(`not found: ${arg}`);
+    process.exit(1);
+  }
+  return p;
+}
+
+function resolveTwoOrExit(store: Store, a: string, b: string): [string, string] {
+  const pa = resolveFileArg(store, a);
+  const pb = resolveFileArg(store, b);
+  if (!pa || !pb) {
+    console.error(`not found: ${pa ? b : a}`);
+    process.exit(1);
+  }
+  return [pa, pb];
 }
 
 // ---------------------------------------------------------------------------
@@ -308,11 +326,7 @@ function cmdGet(args: ParsedArgs): void {
   }
   const store = new Store();
   try {
-    const p = resolveFileArg(store, file);
-    if (!p) {
-      console.error(`not found: ${file}`);
-      process.exit(1);
-    }
+    const p = resolveOrExit(store, file);
     const detail = getNodeDetail(store, p);
     if (!detail) {
       console.error(`not indexed: ${p}`);
@@ -332,11 +346,7 @@ function cmdNeighbors(args: ParsedArgs): void {
   }
   const store = new Store();
   try {
-    const p = resolveFileArg(store, file);
-    if (!p) {
-      console.error(`not found: ${file}`);
-      process.exit(1);
-    }
+    const p = resolveOrExit(store, file);
     const cat = flagCategory(args.flags.category);
     const dirRaw = flagStr(args.flags.direction) ?? "both";
     if (dirRaw !== "in" && dirRaw !== "out" && dirRaw !== "both") {
@@ -371,11 +381,7 @@ function cmdSiblings(args: ParsedArgs): void {
   }
   const store = new Store();
   try {
-    const p = resolveFileArg(store, file);
-    if (!p) {
-      console.error(`not found: ${file}`);
-      process.exit(1);
-    }
+    const p = resolveOrExit(store, file);
     const sharedMin = flagNum(args.flags["shared-min"], 1);
     const rows = graphSiblings(store, p, sharedMin);
     if (args.flags.json) {
@@ -400,12 +406,7 @@ function cmdDistance(args: ParsedArgs): void {
   }
   const store = new Store();
   try {
-    const pa = resolveFileArg(store, a);
-    const pb = resolveFileArg(store, b);
-    if (!pa || !pb) {
-      console.error(`not found: ${pa ? b : a}`);
-      process.exit(1);
-    }
+    const [pa, pb] = resolveTwoOrExit(store, a, b);
     const max = flagNum(args.flags.max, 6);
     const includeExternal = !!args.flags["include-external"];
     const d = graphDistance(store, pa, pb, max, includeExternal);
@@ -428,12 +429,7 @@ function cmdPath(args: ParsedArgs): void {
   }
   const store = new Store();
   try {
-    const pa = resolveFileArg(store, a);
-    const pb = resolveFileArg(store, b);
-    if (!pa || !pb) {
-      console.error(`not found: ${pa ? b : a}`);
-      process.exit(1);
-    }
+    const [pa, pb] = resolveTwoOrExit(store, a, b);
     const max = flagNum(args.flags.max, 6);
     const includeExternal = !!args.flags["include-external"];
     const p = graphPath(store, pa, pb, max, includeExternal);
@@ -458,11 +454,7 @@ function cmdFindByDistance(args: ParsedArgs): void {
   }
   const store = new Store();
   try {
-    const p = resolveFileArg(store, file);
-    if (!p) {
-      console.error(`not found: ${file}`);
-      process.exit(1);
-    }
+    const p = resolveOrExit(store, file);
     const maxDistance = flagNum(args.flags["max-distance"], 2);
     const fileType = flagStr(args.flags["file-type"]);
     const excludeExisting = !args.flags["include-existing"];
@@ -594,9 +586,6 @@ async function cmdMcp(_args: ParsedArgs): Promise<void> {
   const { startMcp } = await import("../mcp/server.js");
   await startMcp();
 }
-
-// Silence unused-import warnings for getCollection (reserved for future use).
-void getCollection;
 
 // ---------------------------------------------------------------------------
 // Main

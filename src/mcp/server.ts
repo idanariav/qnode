@@ -38,6 +38,22 @@ function errText(msg: string): { content: { type: "text"; text: string }[]; isEr
   return { content: [{ type: "text", text: msg }], isError: true };
 }
 
+function resolveOrErr(store: Store, arg: string): string | ReturnType<typeof errText> {
+  const p = resolveFileArg(store, arg);
+  return p ?? errText(`not found: ${arg}`);
+}
+
+function resolveTwoOrErr(
+  store: Store,
+  a: string,
+  b: string,
+): [string, string] | ReturnType<typeof errText> {
+  const ra = resolveFileArg(store, a);
+  const rb = resolveFileArg(store, b);
+  if (!ra || !rb) return errText(`not found: ${ra ? b : a}`);
+  return [ra, rb];
+}
+
 export async function startMcp(): Promise<void> {
   const server = new Server(
     { name: "qnode", version: "0.1.0" },
@@ -178,16 +194,16 @@ export async function startMcp(): Promise<void> {
     if (name === "siblings") {
       const p = typeof args.path === "string" ? args.path : "";
       if (!p) return errText("missing path");
-      const resolved = resolveFileArg(store, p);
-      if (!resolved) return errText(`not found: ${p}`);
+      const resolved = resolveOrErr(store, p);
+      if (typeof resolved !== "string") return resolved;
       const sharedMin = typeof args.shared_min === "number" ? args.shared_min : 1;
       return jsonText(graphSiblings(store, resolved, sharedMin));
     }
     if (name === "neighbors") {
       const p = typeof args.path === "string" ? args.path : "";
       if (!p) return errText("missing path");
-      const resolved = resolveFileArg(store, p);
-      if (!resolved) return errText(`not found: ${p}`);
+      const resolved = resolveOrErr(store, p);
+      if (typeof resolved !== "string") return resolved;
       const catRaw = typeof args.category === "string" ? args.category : undefined;
       if (catRaw && !isCategory(catRaw)) {
         return errText(`invalid category: ${catRaw} (allowed: ${ALL_CATEGORIES.join(", ")})`);
@@ -203,9 +219,9 @@ export async function startMcp(): Promise<void> {
       const from = typeof args.from === "string" ? args.from : "";
       const to = typeof args.to === "string" ? args.to : "";
       if (!from || !to) return errText("missing from/to");
-      const rf = resolveFileArg(store, from);
-      const rt = resolveFileArg(store, to);
-      if (!rf || !rt) return errText(`not found: ${rf ? to : from}`);
+      const resolved = resolveTwoOrErr(store, from, to);
+      if (!Array.isArray(resolved)) return resolved;
+      const [rf, rt] = resolved;
       const max = typeof args.max === "number" ? args.max : 6;
       const includeExternal = !!args.include_external;
       return jsonText({ distance: graphDistance(store, rf, rt, max, includeExternal) });
@@ -214,9 +230,9 @@ export async function startMcp(): Promise<void> {
       const from = typeof args.from === "string" ? args.from : "";
       const to = typeof args.to === "string" ? args.to : "";
       if (!from || !to) return errText("missing from/to");
-      const rf = resolveFileArg(store, from);
-      const rt = resolveFileArg(store, to);
-      if (!rf || !rt) return errText(`not found: ${rf ? to : from}`);
+      const resolved = resolveTwoOrErr(store, from, to);
+      if (!Array.isArray(resolved)) return resolved;
+      const [rf, rt] = resolved;
       const max = typeof args.max === "number" ? args.max : 6;
       const includeExternal = !!args.include_external;
       return jsonText({ path: graphPath(store, rf, rt, max, includeExternal) });
@@ -224,8 +240,8 @@ export async function startMcp(): Promise<void> {
     if (name === "get") {
       const p = typeof args.path === "string" ? args.path : "";
       if (!p) return errText("missing path");
-      const resolved = resolveFileArg(store, p);
-      if (!resolved) return errText(`not found: ${p}`);
+      const resolved = resolveOrErr(store, p);
+      if (typeof resolved !== "string") return resolved;
       const d = getNodeDetail(store, resolved);
       if (!d) return errText(`not indexed: ${resolved}`);
       return jsonText(d);
@@ -237,8 +253,8 @@ export async function startMcp(): Promise<void> {
     if (name === "metrics") {
       const p = typeof args.path === "string" ? args.path : "";
       if (!p) return errText("missing path");
-      const resolved = resolveFileArg(store, p);
-      if (!resolved) return errText(`not found: ${p}`);
+      const resolved = resolveOrErr(store, p);
+      if (typeof resolved !== "string") return resolved;
       const m = store.getMetrics(resolved);
       if (!m) {
         return jsonText({ path: resolved, message: "metrics not computed; run: qnode metrics" });
@@ -248,8 +264,8 @@ export async function startMcp(): Promise<void> {
     if (name === "find_by_distance") {
       const p = typeof args.path === "string" ? args.path : "";
       if (!p) return errText("missing path");
-      const resolved = resolveFileArg(store, p);
-      if (!resolved) return errText(`not found: ${p}`);
+      const resolved = resolveOrErr(store, p);
+      if (typeof resolved !== "string") return resolved;
       const fileType = typeof args.file_type === "string" ? args.file_type : undefined;
       const maxDistance = typeof args.max_distance === "number" ? args.max_distance : 2;
       const excludeExisting = args.exclude_existing !== false;
