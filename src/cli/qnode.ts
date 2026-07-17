@@ -146,7 +146,7 @@ Commands:
   fields reset [--collection <n>]
   (fields: ${FIELD_KEYS.join(", ")})
 
-  index   [--collection <n>]                           Walk + upsert nodes and edges
+  index   [--collection <n>] [--force]                 Walk + upsert nodes and edges (skips unchanged files unless --force)
   status  [--collection <n>]                           Counts by category
 
   get              <file>                                     Node + all incoming/outgoing edges
@@ -279,6 +279,7 @@ function cmdCollection(args: ParsedArgs): void {
 
 async function cmdIndex(args: ParsedArgs): Promise<void> {
   const only = flagStr(args.flags.collection);
+  const force = !!args.flags.force;
   const cols = listCollections().filter((c) => !only || c.name === only);
   if (cols.length === 0) {
     console.error(only ? `no such collection: ${only}` : "no collections registered");
@@ -288,7 +289,7 @@ async function cmdIndex(args: ParsedArgs): Promise<void> {
   try {
     for (const col of cols) {
       const fields = effectiveCategoryFields(col.name);
-      await indexCollection(store, col, fields, (m) => console.log(m));
+      await indexCollection(store, col, fields, (m) => console.log(m), { force });
     }
   } finally {
     store.close();

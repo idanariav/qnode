@@ -23,6 +23,8 @@ export interface CollectionRow {
   pattern: string;
   vault_root: string | null;
   updated_at: number;
+  /** Hash of the resolved CategoryFields at last index time; a mismatch forces a full reparse. */
+  fields_hash: string | null;
 }
 
 export interface NodeRow {
@@ -149,22 +151,35 @@ export class Store {
       CREATE INDEX IF NOT EXISTS idx_node_metrics_pagerank ON node_metrics(pagerank DESC);
       CREATE INDEX IF NOT EXISTS idx_node_metrics_community ON node_metrics(community);
     `);
+
+    const collectionCols = this.db.prepare(`PRAGMA table_info(collections)`).all() as { name: string }[];
+    if (!collectionCols.some((c) => c.name === "fields_hash")) {
+      this.db.exec(`ALTER TABLE collections ADD COLUMN fields_hash TEXT`);
+    }
   }
 
   // -------- Collections --------
 
-  upsertCollection(row: Omit<CollectionRow, "updated_at">): void {
+  upsertCollection(row: Omit<CollectionRow, "updated_at" | "fields_hash"> & { fields_hash?: string | null }): void {
     this.db
       .prepare(
-        `INSERT INTO collections (name, path, pattern, vault_root, updated_at)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO collections (name, path, pattern, vault_root, fields_hash, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(name) DO UPDATE SET
            path = excluded.path,
            pattern = excluded.pattern,
            vault_root = excluded.vault_root,
+           fields_hash = excluded.fields_hash,
            updated_at = excluded.updated_at`,
       )
-      .run(row.name, row.path, row.pattern, row.vault_root, Date.now());
+      .run(row.name, row.path, row.pattern, row.vault_root, row.fields_hash ?? null, Date.now());
+  }
+
+  getCollectionRow(name: string): CollectionRow | null {
+    const row = this.db
+      .prepare(`SELECT name, path, pattern, vault_root, fields_hash, updated_at FROM collections WHERE name = ?`)
+      .get(name) as CollectionRow | undefined;
+    return row ?? null;
   }
 
   // -------- Nodes --------
@@ -200,6 +215,22 @@ export class Store {
       )
       .get(suffix, suffix) as NodeRow | undefined;
     return row ?? null;
+  }
+
+  /**
+   * Remove a node that no longer exists on disk: drops its outgoing edges,
+   * unresolves any edges that pointed to it (dst_path → NULL, so they behave
+   * like any other unresolved target rather than dangling references), and
+   * clears its persisted metrics.
+   */
+  deleteNode(path: string): void {
+    const txn = this.db.transaction(() => {
+      this.db.prepare(`DELETE FROM edges WHERE src_path = ?`).run(path);
+      this.db.prepare(`UPDATE edges SET dst_path = NULL WHERE dst_path = ?`).run(path);
+      this.db.prepare(`DELETE FROM nodes WHERE path = ?`).run(path);
+      this.db.prepare(`DELETE FROM node_metrics WHERE path = ?`).run(path);
+    });
+    txn();
   }
 
   // -------- Edges --------

@@ -115,11 +115,11 @@ qnode collection list
 ### Indexing
 
 ```sh
-qnode index [--collection <name>]       # walk files and build the graph
-qnode status [--collection <name>]      # show edge counts by category
+qnode index [--collection <name>] [--force]   # walk files and build the graph
+qnode status [--collection <name>]            # show edge counts by category
 ```
 
-Run `index` after adding a collection or when your notes change. `status` gives a quick summary of what's in the graph.
+Run `index` after adding a collection or when your notes change — unchanged files (same mtime, same field config) are skipped automatically. Pass `--force` to bypass that and fully reparse everything. `status` gives a quick summary of what's in the graph.
 
 ---
 

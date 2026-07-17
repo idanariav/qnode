@@ -9,12 +9,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for key types (`NodeRow`, `EdgeRow`, `Cat
 ```
 1. Discover files    indexer.ts:collectMarkdownFiles()
 2. Build resolver    resolver.ts:buildIndex()
-3. Parse in-coll.    indexer.ts:parseAndWrite() × N  [collection=name]
-4. Parse external    indexer.ts:parseAndWrite() × M  [collection=null, filter to edges into coll]
+3. Parse in-coll.    indexer.ts:parseAndWrite() × N  [collection=name, skips unchanged files]
+4. Parse external    indexer.ts:parseAndWrite() × M  [collection=null, filter to edges into coll, skips unchanged files]
 5. Post-pass relink  store.ts:relinkUnresolved()
+6. Delete stale      store.ts:deleteNode() for in-collection files removed from disk
 ```
 
-Entry: `indexer.ts:indexCollection(store, col, fields, log?)` → returns `IndexReport`.
+Entry: `indexer.ts:indexCollection(store, col, fields, log?, options?)` → returns `IndexReport`. `options.force` bypasses the skip logic below (also `qnode index --force`).
 
 ## 1. File Discovery — `indexer.ts`
 
@@ -24,6 +25,16 @@ Entry: `indexer.ts:indexCollection(store, col, fields, log?)` → returns `Index
 - `pattern` = glob from collection config, default `**/*.md`
 - Files are classified: **in-collection** (under `col.path`) vs **external** (under `vault_root` but outside `col.path`)
 - External files are only stored if they have at least one edge resolving into the collection (`touchesCollection=true`)
+
+## Incremental Skip & Deletion — `indexer.ts`
+
+A file is skipped (not reparsed) when all of: its stored `mtime` equals its on-disk `mtime`, its stored `collection` matches what this pass would assign, and the collection's field config hasn't changed since it was last indexed. A skipped file's edge counts are read back via `store.outgoing(file)` so `IndexReport` totals stay accurate without reparsing.
+
+Config-change detection: `hashFields(fields)` hashes the resolved `CategoryFields`; the hash is persisted on the collection row (`collections.fields_hash`) and compared on the next run. A mismatch (or a brand-new collection) forces a full reparse, since the same file content can map to different edges under a different field→category mapping.
+
+External files follow the same rule, but a file with no existing node (never previously touched the collection) is always parsed — skipping requires knowing it *doesn't* touch the collection, which is exactly what parsing determines.
+
+After indexing, in-collection nodes (`collection = col.name`) whose file is no longer in the current file list are removed via `store.deleteNode()`: their outgoing edges are dropped, edges pointing at them are unresolved (`dst_path → NULL`) rather than deleted, and their metrics row is cleared. External nodes are never auto-deleted here — they aren't scoped to one collection, so another collection's index run may still depend on the same path.
 
 ## 2. Path Resolution Index — `resolver.ts`
 
@@ -99,6 +110,15 @@ Code spans and fenced code blocks are excluded automatically by remark-parse bef
 ### Schema (relevant tables)
 
 ```sql
+CREATE TABLE collections (
+  name TEXT PRIMARY KEY,
+  path TEXT NOT NULL,
+  pattern TEXT NOT NULL,
+  vault_root TEXT,
+  fields_hash TEXT,   -- hash of resolved CategoryFields at last index; mismatch forces full reparse
+  updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE nodes (
   path TEXT PRIMARY KEY,
   collection TEXT,   -- null for external nodes; FK to collections(name)
@@ -128,10 +148,14 @@ CREATE INDEX idx_edges_dst_tgt ON edges(dst_target);
 | Method | Purpose |
 |--------|---------|
 | `store.upsertNode(row)` | INSERT OR REPLACE node |
+| `store.getNode(path)` | Read a node's stored `mtime`/`collection`, used by the skip check |
+| `store.deleteNode(path)` | Remove a node whose file no longer exists: drops its edges, unresolves inbound edges, clears its metrics |
 | `store.clearEdgesFrom(src)` | Delete all edges for a file before re-parse |
 | `store.insertEdges(edges[])` | Batch insert in a single transaction |
 | `store.relinkUnresolved(basenameIndex)` | Post-pass: UPDATE edges where dst_path=null if basename resolves uniquely |
-| `store.upsertCollection(row)` | Register/update collection metadata |
+| `store.upsertCollection(row)` | Register/update collection metadata, including `fields_hash` |
+| `store.getCollectionRow(name)` | Read a collection's stored `fields_hash`, used to detect config changes |
+| `store.loadInCollectionNodes(collection)` | List node paths for a collection, used to detect files removed from disk |
 
 ## 5. Post-Pass Relink — `store.ts:relinkUnresolved()`
 

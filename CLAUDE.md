@@ -20,7 +20,7 @@ qnode fields get   [--collection <n>]
 qnode fields set   <field> <val,val,...> [--collection <n>]
 qnode fields reset [--collection <n>]
 
-qnode index   [--collection <n>]          # Parse files and populate SQLite index
+qnode index   [--collection <n>] [--force] # Parse files and populate SQLite index (skips unchanged files unless --force)
 qnode status  [--collection <n>]          # Node/edge counts by category
 
 qnode get              <file>

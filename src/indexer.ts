@@ -14,6 +14,7 @@
 
 import fg from "fast-glob";
 import { readFileSync } from "fs";
+import { createHash } from "crypto";
 import { resolve, sep } from "path";
 import type { NamedCollection } from "./collections.js";
 import type { CategoryFields } from "./categories.js";
@@ -30,6 +31,15 @@ export interface IndexReport {
   resolved: number;
   unresolved: number;
   relinked: number;
+  /** Files whose mtime and category-field config were unchanged since last index — reparsing was skipped. */
+  skipped: number;
+  /** In-collection nodes removed because their file no longer exists on disk. */
+  deleted: number;
+}
+
+/** Stable hash of the resolved CategoryFields — a change forces a full reparse. */
+function hashFields(fields: CategoryFields): string {
+  return createHash("sha256").update(JSON.stringify(fields)).digest("hex");
 }
 
 function isUnder(file: string, dir: string): boolean {
@@ -54,6 +64,7 @@ export async function indexCollection(
   col: NamedCollection,
   fields: CategoryFields,
   log?: (msg: string) => void,
+  options?: { force?: boolean },
 ): Promise<IndexReport> {
   const report: IndexReport = {
     collection: col.name,
@@ -64,6 +75,8 @@ export async function indexCollection(
     resolved: 0,
     unresolved: 0,
     relinked: 0,
+    skipped: 0,
+    deleted: 0,
   };
   log?.(`[${col.name}] scanning ${col.path}...`);
   const colAbs = resolve(col.path);
@@ -74,15 +87,46 @@ export async function indexCollection(
   const resolverIdx: ResolverIndex = buildIndex(allFiles, scanRoot);
   log?.(`[${col.name}] found ${allFiles.length} markdown files under ${scanRoot}`);
 
+  // A change to field→category mappings can change a file's edges even
+  // when its content (and thus mtime) hasn't changed, so it forces a full
+  // reparse of the collection regardless of per-file mtime comparisons.
+  const fieldsHash = hashFields(fields);
+  const existingCol = store.getCollectionRow(col.name);
+  const configChanged = (options?.force ?? false) || !existingCol || existingCol.fields_hash !== fieldsHash;
+
   // 2. Register the collection in the DB.
   store.upsertCollection({
     name: col.name,
     path: colAbs,
     pattern: col.pattern || "**/*.md",
     vault_root: col.vault_root ? resolve(col.vault_root) : null,
+    fields_hash: fieldsHash,
   });
 
   const now = Date.now();
+
+  // Skip re-parsing a file whose on-disk mtime and collection slot match
+  // what's already stored, unless the config change above forces a reparse.
+  // `expectedCollection` is the collection name for in-collection files, or
+  // null for external files (which are only ever stored once they resolve
+  // into the collection — see the external pass below).
+  function shouldSkip(file: string, expectedCollection: string | null): boolean {
+    if (configChanged) return false;
+    const existing = store.getNode(file);
+    if (!existing) return false;
+    if (existing.collection !== expectedCollection) return false;
+    if (existing.mtime !== fileMtime(file)) return false;
+    return true;
+  }
+
+  function countExistingEdges(file: string): void {
+    const rows = store.outgoing(file);
+    report.edges += rows.length;
+    for (const r of rows) {
+      if (r.dst_path !== null) report.resolved++;
+      else report.unresolved++;
+    }
+  }
 
   // 3. First pass: parse in-collection files, record outgoing edges.
   // External files (inside vault_root but outside colAbs) are parsed only
@@ -97,6 +141,13 @@ export async function indexCollection(
 
   // 3a. Parse in-collection.
   for (const f of inCollection) {
+    if (shouldSkip(f, col.name)) {
+      countExistingEdges(f);
+      report.in_collection++;
+      report.skipped++;
+      report.scanned++;
+      continue;
+    }
     try {
       const { edgesInserted, title } = parseAndWrite(store, f, fields, resolverIdx, col.name);
       store.upsertNode({
@@ -118,8 +169,17 @@ export async function indexCollection(
 
   // 3b. Parse external files but only keep edges whose resolved destination
   // is an in-collection node. We also register such external files as nodes
-  // (collection = NULL) so they can appear as endpoints in queries.
+  // (collection = NULL) so they can appear as endpoints in queries. A file
+  // with no existing node has never been seen touching this collection, so
+  // it's always parsed — only previously-touching externals can be skipped.
   for (const f of external) {
+    if (shouldSkip(f, null)) {
+      countExistingEdges(f);
+      report.external++;
+      report.skipped++;
+      report.scanned++;
+      continue;
+    }
     try {
       const { edgesInserted, title, touchesCollection } = parseAndWrite(
         store,
@@ -154,10 +214,22 @@ export async function indexCollection(
   for (const [k, v] of resolverIdx.byBasename) basenameIdx.set(k, v);
   report.relinked = store.relinkUnresolved(basenameIdx);
 
+  // 5. Remove in-collection nodes whose file no longer exists on disk.
+  // External nodes are left alone — they aren't scoped to a single
+  // collection, so another collection may still reference the same path.
+  const currentPaths = new Set(inCollection);
+  for (const p of store.loadInCollectionNodes(col.name)) {
+    if (!currentPaths.has(p)) {
+      store.deleteNode(p);
+      report.deleted++;
+    }
+  }
+
   log?.(
     `[${col.name}] ${report.scanned} scanned, ${report.in_collection} in-collection, ` +
       `${report.external} external-with-inbound, ${report.edges} edges ` +
-      `(${report.resolved} resolved, ${report.unresolved} unresolved, ${report.relinked} relinked)`,
+      `(${report.resolved} resolved, ${report.unresolved} unresolved, ${report.relinked} relinked, ` +
+      `${report.skipped} skipped, ${report.deleted} deleted)`,
   );
   return report;
 }
