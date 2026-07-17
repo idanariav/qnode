@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Changed
+- PageRank and betweenness centrality in `qnode metrics` now use `graphology-metrics` instead of hand-rolled implementations
 - Consolidated duplicated "resolve file or error" boilerplate in the CLI and MCP server into shared helpers
 - Consolidated wikilink target normalization (stripping `#section`/`^block`/`|alias`) into a single shared function
 - Consolidated duplicated BFS neighbor-query SQL in `store.ts` into a single prepared-statement builder

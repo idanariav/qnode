@@ -1,5 +1,7 @@
-import { UndirectedGraph } from "graphology";
+import { DirectedGraph, UndirectedGraph } from "graphology";
 import * as louvainPkg from "graphology-communities-louvain";
+import * as pagerankPkg from "graphology-metrics/centrality/pagerank.js";
+import * as betweennessPkg from "graphology-metrics/centrality/betweenness.js";
 import type { MetricsRow, Store } from "./store.js";
 
 interface GraphData {
@@ -46,100 +48,45 @@ function loadGraph(store: Store, collection?: string): GraphData {
   return { nodes, adjOut, adjIn, adjUnd };
 }
 
-function computePageRank(graph: GraphData, damping = 0.85, maxIter = 100, epsilon = 1e-6): Map<string, number> {
-  const { nodes, adjOut, adjIn } = graph;
-  const N = nodes.length;
-  if (N === 0) return new Map();
-
-  const pr = new Map<string, number>();
-  for (const n of nodes) pr.set(n, 1 / N);
-
-  const outDeg = new Map<string, number>();
-  for (const n of nodes) outDeg.set(n, adjOut.get(n)?.length ?? 0);
-
-  for (let iter = 0; iter < maxIter; iter++) {
-    const danglingSum = nodes.reduce((sum, n) => {
-      return outDeg.get(n) === 0 ? sum + (pr.get(n) ?? 0) : sum;
-    }, 0);
-    const base = (1 - damping) / N + damping * danglingSum / N;
-
-    let delta = 0;
-    const newPr = new Map<string, number>();
-    for (const n of nodes) {
-      const srcs = adjIn.get(n) ?? [];
-      let rank = base;
-      for (const src of srcs) {
-        const deg = outDeg.get(src) ?? 0;
-        if (deg > 0) rank += damping * (pr.get(src) ?? 0) / deg;
-      }
-      newPr.set(n, rank);
-      delta += Math.abs(rank - (pr.get(n) ?? 0));
+function buildUndirectedGraph(graph: GraphData): UndirectedGraph {
+  const g = new UndirectedGraph({ multi: false });
+  for (const n of graph.nodes) g.addNode(n);
+  for (const [src, dsts] of graph.adjUnd) {
+    for (const dst of dsts) {
+      if (!g.hasEdge(src, dst)) g.addEdge(src, dst);
     }
-    for (const [n, v] of newPr) pr.set(n, v);
-    if (delta < epsilon) break;
   }
-
-  // Normalize
-  const total = nodes.reduce((s, n) => s + (pr.get(n) ?? 0), 0);
-  if (total > 0) for (const n of nodes) pr.set(n, (pr.get(n) ?? 0) / total);
-
-  return pr;
+  return g;
 }
 
-function computeBetweenness(graph: GraphData): Map<string, number> {
-  const { nodes, adjUnd } = graph;
-  const bc = new Map<string, number>();
-  for (const n of nodes) bc.set(n, 0);
+function computePageRank(graph: GraphData): Map<string, number> {
+  if (graph.nodes.length === 0) return new Map();
 
-  for (const s of nodes) {
-    const stack: string[] = [];
-    const pred = new Map<string, string[]>();
-    const sigma = new Map<string, number>();
-    const dist = new Map<string, number>();
-    for (const n of nodes) {
-      pred.set(n, []);
-      sigma.set(n, 0);
-      dist.set(n, -1);
-    }
-    sigma.set(s, 1);
-    dist.set(s, 0);
-
-    const queue: string[] = [s];
-    let qi = 0;
-    while (qi < queue.length) {
-      const v = queue[qi++]!;
-      stack.push(v);
-      const dv = dist.get(v) ?? 0;
-      const sv = sigma.get(v) ?? 0;
-      for (const w of adjUnd.get(v) ?? []) {
-        if ((dist.get(w) ?? -1) < 0) {
-          queue.push(w);
-          dist.set(w, dv + 1);
-        }
-        if ((dist.get(w) ?? 0) === dv + 1) {
-          sigma.set(w, (sigma.get(w) ?? 0) + sv);
-          pred.get(w)!.push(v);
-        }
-      }
-    }
-
-    const delta = new Map<string, number>();
-    for (const n of nodes) delta.set(n, 0);
-    while (stack.length > 0) {
-      const w = stack.pop()!;
-      const sw = sigma.get(w) ?? 1;
-      const dw = delta.get(w) ?? 0;
-      for (const v of pred.get(w) ?? []) {
-        const sv = sigma.get(v) ?? 0;
-        delta.set(v, (delta.get(v) ?? 0) + (sv / sw) * (1 + dw));
-      }
-      if (w !== s) bc.set(w, (bc.get(w) ?? 0) + dw);
+  const g = new DirectedGraph();
+  for (const n of graph.nodes) g.addNode(n);
+  for (const [src, dsts] of graph.adjOut) {
+    for (const dst of dsts) {
+      if (!g.hasEdge(src, dst)) g.addEdge(src, dst);
     }
   }
 
-  // Undirected: each pair counted twice
-  for (const n of nodes) bc.set(n, (bc.get(n) ?? 0) / 2);
-  return bc;
+  const pagerank = pagerankPkg.default as unknown as (
+    g: DirectedGraph,
+    opts: { getEdgeWeight: null },
+  ) => Record<string, number>;
+  const result = pagerank(g, { getEdgeWeight: null });
+  return new Map(Object.entries(result));
+}
+
+function computeBetweenness(g: UndirectedGraph): Map<string, number> {
+  const betweennessCentrality = betweennessPkg.default as unknown as (
+    g: UndirectedGraph,
+    opts: { getEdgeWeight: null; normalized: boolean },
+  ) => Record<string, number>;
+  // normalized: false to match Brandes' raw values (undirected pairs
+  // counted once, via the library's built-in ÷2 for undirected graphs).
+  const result = betweennessCentrality(g, { getEdgeWeight: null, normalized: false });
+  return new Map(Object.entries(result));
 }
 
 function computeClustering(graph: GraphData): Map<string, number> {
@@ -167,17 +114,8 @@ function computeClustering(graph: GraphData): Map<string, number> {
   return cc;
 }
 
-function computeCommunity(graph: GraphData): Map<string, number> {
-  const { nodes, adjUnd } = graph;
-  if (nodes.length === 0) return new Map();
-
-  const g = new UndirectedGraph({ multi: false });
-  for (const n of nodes) g.addNode(n);
-  for (const [src, dsts] of adjUnd) {
-    for (const dst of dsts) {
-      if (!g.hasEdge(src, dst)) g.addEdge(src, dst);
-    }
-  }
+function computeCommunity(g: UndirectedGraph): Map<string, number> {
+  if (g.order === 0) return new Map();
 
   const louvain = louvainPkg.default as unknown as (g: UndirectedGraph, opts: { getEdgeWeight: null }) => Record<string, number>;
   const partition = louvain(g, { getEdgeWeight: null });
@@ -188,10 +126,12 @@ export function computeMetrics(store: Store, collection?: string): MetricsRow[] 
   const graph = loadGraph(store, collection);
   if (graph.nodes.length === 0) return [];
 
+  const undirected = buildUndirectedGraph(graph);
+
   const pr = computePageRank(graph);
-  const bc = computeBetweenness(graph);
+  const bc = computeBetweenness(undirected);
   const cc = computeClustering(graph);
-  const comm = computeCommunity(graph);
+  const comm = computeCommunity(undirected);
 
   const now = Date.now();
   return graph.nodes.map((path) => ({
