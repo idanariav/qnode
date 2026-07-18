@@ -68,5 +68,10 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "allowScripts": {
+    "better-sqlite3@12.8.0": true,
+    "esbuild@0.27.7": true,
+    "fsevents@2.3.3": true
+  }
 }
