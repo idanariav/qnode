@@ -61,9 +61,9 @@
     "@types/node": "^22.0.0",
     "mdast-util-from-markdown": "^2.0.3",
     "micromark-util-types": "^2.0.2",
-    "tsx": "4.21.0",
+    "tsx": "4.23.1",
     "typescript": "^5.9.3",
-    "vitest": "3.2.4"
+    "vitest": "3.2.7"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -71,7 +71,7 @@
   "license": "MIT",
   "allowScripts": {
     "better-sqlite3@12.8.0": true,
-    "esbuild@0.27.7": true,
+    "esbuild@0.28.1": true,
     "fsevents@2.3.3": true
   }
 }
