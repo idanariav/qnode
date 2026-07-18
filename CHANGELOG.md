@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Added
-- **Incremental indexing** — `qnode index` now skips files whose mtime and collection assignment are unchanged since the last run, and forces a full reparse when a collection's field→category config changes. Pass `--force` to bypass and fully reparse. Files removed from disk now have their in-collection node and edges cleaned up automatically (edges pointing at a deleted node are unresolved rather than left dangling).
+- **Incremental indexing** — `qnode index` now skips files whose mtime and collection assignment are unchanged since the last run, and forces a full reparse when a collection's field→category config changes. Pass `--force` to bypass and fully reparse. Files removed from disk now have their node and edges cleaned up automatically, both in-collection and external (edges pointing at a deleted node are unresolved rather than left dangling).
 
 ### Changed
 - PageRank and betweenness centrality in `qnode metrics` now use `graphology-metrics` instead of hand-rolled implementations

@@ -13,7 +13,7 @@
  */
 
 import fg from "fast-glob";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { createHash } from "crypto";
 import { resolve, sep } from "path";
 import type { NamedCollection } from "./collections.js";
@@ -35,6 +35,8 @@ export interface IndexReport {
   skipped: number;
   /** In-collection nodes removed because their file no longer exists on disk. */
   deleted: number;
+  /** External nodes (from any collection) removed because their file no longer exists on disk. */
+  external_deleted: number;
 }
 
 /** Stable hash of the resolved CategoryFields — a change forces a full reparse. */
@@ -77,6 +79,7 @@ export async function indexCollection(
     relinked: 0,
     skipped: 0,
     deleted: 0,
+    external_deleted: 0,
   };
   log?.(`[${col.name}] scanning ${col.path}...`);
   const colAbs = resolve(col.path);
@@ -215,8 +218,6 @@ export async function indexCollection(
   report.relinked = store.relinkUnresolved(basenameIdx);
 
   // 5. Remove in-collection nodes whose file no longer exists on disk.
-  // External nodes are left alone — they aren't scoped to a single
-  // collection, so another collection may still reference the same path.
   const currentPaths = new Set(inCollection);
   for (const p of store.loadInCollectionNodes(col.name)) {
     if (!currentPaths.has(p)) {
@@ -225,11 +226,23 @@ export async function indexCollection(
     }
   }
 
+  // 6. Remove external nodes (across all collections, not just this one)
+  // whose file no longer exists on disk. A node's path is always absolute,
+  // so existence on disk is a global fact — no collection could ever
+  // rediscover a file that's gone, regardless of which collection's
+  // vault_root previously found it.
+  for (const p of store.loadExternalNodes()) {
+    if (!existsSync(p)) {
+      store.deleteNode(p);
+      report.external_deleted++;
+    }
+  }
+
   log?.(
     `[${col.name}] ${report.scanned} scanned, ${report.in_collection} in-collection, ` +
       `${report.external} external-with-inbound, ${report.edges} edges ` +
       `(${report.resolved} resolved, ${report.unresolved} unresolved, ${report.relinked} relinked, ` +
-      `${report.skipped} skipped, ${report.deleted} deleted)`,
+      `${report.skipped} skipped, ${report.deleted} deleted, ${report.external_deleted} external deleted)`,
   );
   return report;
 }

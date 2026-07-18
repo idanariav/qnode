@@ -404,6 +404,13 @@ export class Store {
       .all() as { src: string; dst: string }[];
   }
 
+  /** Load external node paths (collection IS NULL), for stale-file cleanup. */
+  loadExternalNodes(): string[] {
+    return (
+      this.db.prepare(`SELECT path FROM nodes WHERE collection IS NULL`).all() as { path: string }[]
+    ).map((r) => r.path);
+  }
+
   /** Load in-collection node paths for metric computation. */
   loadInCollectionNodes(collection?: string): string[] {
     if (collection) {

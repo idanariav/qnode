@@ -13,6 +13,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for key types (`NodeRow`, `EdgeRow`, `Cat
 4. Parse external    indexer.ts:parseAndWrite() × M  [collection=null, filter to edges into coll, skips unchanged files]
 5. Post-pass relink  store.ts:relinkUnresolved()
 6. Delete stale      store.ts:deleteNode() for in-collection files removed from disk
+7. Delete stale ext. store.ts:deleteNode() for external nodes (any collection) removed from disk
 ```
 
 Entry: `indexer.ts:indexCollection(store, col, fields, log?, options?)` → returns `IndexReport`. `options.force` bypasses the skip logic below (also `qnode index --force`).
@@ -34,7 +35,9 @@ Config-change detection: `hashFields(fields)` hashes the resolved `CategoryField
 
 External files follow the same rule, but a file with no existing node (never previously touched the collection) is always parsed — skipping requires knowing it *doesn't* touch the collection, which is exactly what parsing determines.
 
-After indexing, in-collection nodes (`collection = col.name`) whose file is no longer in the current file list are removed via `store.deleteNode()`: their outgoing edges are dropped, edges pointing at them are unresolved (`dst_path → NULL`) rather than deleted, and their metrics row is cleared. External nodes are never auto-deleted here — they aren't scoped to one collection, so another collection's index run may still depend on the same path.
+After indexing, in-collection nodes (`collection = col.name`) whose file is no longer in the current file list are removed via `store.deleteNode()`: their outgoing edges are dropped, edges pointing at them are unresolved (`dst_path → NULL`) rather than deleted, and their metrics row is cleared.
+
+External nodes (`collection = NULL`) are cleaned up separately, and globally rather than per-collection: every `indexCollection()` run also sweeps *all* external nodes in the store (not just ones touching the current collection) and deletes any whose `path` no longer exists on disk (`fs.existsSync`). This is safe without tracking which collection(s) reference a given external path — a node's `path` is always absolute, so if the file is gone, no collection's file walk could ever rediscover it, regardless of whose `vault_root` previously found it.
 
 ## 2. Path Resolution Index — `resolver.ts`
 
@@ -156,6 +159,7 @@ CREATE INDEX idx_edges_dst_tgt ON edges(dst_target);
 | `store.upsertCollection(row)` | Register/update collection metadata, including `fields_hash` |
 | `store.getCollectionRow(name)` | Read a collection's stored `fields_hash`, used to detect config changes |
 | `store.loadInCollectionNodes(collection)` | List node paths for a collection, used to detect files removed from disk |
+| `store.loadExternalNodes()` | List all external (`collection IS NULL`) node paths, used to detect files removed from disk |
 
 ## 5. Post-Pass Relink — `store.ts:relinkUnresolved()`
 

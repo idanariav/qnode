@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync, utimesSync } from "fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, utimesSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { Store } from "../src/store.js";
@@ -99,5 +99,47 @@ describe("indexCollection — incremental indexing", () => {
     const edgesFromA = store.outgoing(join(dir, "A.md"));
     expect(edgesFromA).toHaveLength(1);
     expect(edgesFromA[0]!.dst_path).toBeNull();
+  });
+
+  it("removes an external node once its file is deleted from disk", async () => {
+    const vaultDir = mkdtempSync(join(tmpdir(), "qnode-vault-"));
+    const colDir = join(vaultDir, "coll");
+    mkdirSync(colDir);
+    const extPath = join(vaultDir, "Ext.md");
+    writeFileSync(extPath, "# Ext\n\n[[coll/A]]\n", "utf-8");
+    writeFileSync(join(colDir, "A.md"), "# A\n", "utf-8");
+
+    const vaultCol: NamedCollection = { name: "v", path: colDir, pattern: "**/*.md", vault_root: vaultDir };
+    try {
+      const first = await indexCollection(store, vaultCol, DEFAULT_CATEGORY_FIELDS);
+      expect(first.external).toBe(1);
+      expect(store.getNode(extPath)).not.toBeNull();
+
+      rmSync(extPath);
+      const second = await indexCollection(store, vaultCol, DEFAULT_CATEGORY_FIELDS);
+      expect(second.external_deleted).toBe(1);
+      expect(store.getNode(extPath)).toBeNull();
+    } finally {
+      rmSync(vaultDir, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves an external node alone while its file still exists", async () => {
+    const vaultDir = mkdtempSync(join(tmpdir(), "qnode-vault-"));
+    const colDir = join(vaultDir, "coll");
+    mkdirSync(colDir);
+    const extPath = join(vaultDir, "Ext.md");
+    writeFileSync(extPath, "# Ext\n\n[[coll/A]]\n", "utf-8");
+    writeFileSync(join(colDir, "A.md"), "# A\n", "utf-8");
+
+    const vaultCol: NamedCollection = { name: "v", path: colDir, pattern: "**/*.md", vault_root: vaultDir };
+    try {
+      await indexCollection(store, vaultCol, DEFAULT_CATEGORY_FIELDS);
+      const second = await indexCollection(store, vaultCol, DEFAULT_CATEGORY_FIELDS);
+      expect(second.external_deleted).toBe(0);
+      expect(store.getNode(extPath)).not.toBeNull();
+    } finally {
+      rmSync(vaultDir, { recursive: true, force: true });
+    }
   });
 });
