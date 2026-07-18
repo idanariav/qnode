@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-18
+
 ### Added
 - **Incremental indexing** — `qnode index` now skips files whose mtime and collection assignment are unchanged since the last run, and forces a full reparse when a collection's field→category config changes. Pass `--force` to bypass and fully reparse. Files removed from disk now have their node and edges cleaned up automatically, both in-collection and external (edges pointing at a deleted node are unresolved rather than left dangling).
 
@@ -10,6 +12,7 @@
 - Consolidated duplicated "resolve file or error" boilerplate in the CLI and MCP server into shared helpers
 - Consolidated wikilink target normalization (stripping `#section`/`^block`/`|alias`) into a single shared function
 - Consolidated duplicated BFS neighbor-query SQL in `store.ts` into a single prepared-statement builder
+- npm publish now uses OIDC trusted publishing instead of an `NPM_TOKEN` secret
 
 ### Removed
 - Unused `zod` dependency and dead `getCollection` import in the CLI
